@@ -5,7 +5,7 @@ import { useAdminLeague } from '../../lib/AdminLeagueContext';
 import { useLeague } from '../../lib/LeagueContext';
 import {
   addAwardDef, removeAwardDef, addAwardWinner, removeAwardWinnerAt,
-  addHallOfFameEntry, removeHallOfFameEntry,
+  addHallOfFameEntry, updateHallOfFameEntry, removeHallOfFameEntry,
 } from '../../lib/domain/mutations';
 import { teamDisplayName } from '../../lib/domain/core';
 import { EmptyNote } from '../site/primitives';
@@ -72,6 +72,60 @@ function WinnerPicker({ season, teams, onPick, onCancel }) {
   );
 }
 
+function InducteeRow({ entry, saving, mutate }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: entry.name || '', year: entry.year || '', playerName: entry.playerName || '', note: entry.note || '',
+  });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  return (
+    <div className="px-3 py-2.5">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">
+            {entry.name}{entry.year ? <span className="text-ink-mute"> · Class {entry.year}</span> : null}
+          </p>
+          {entry.note && <p className="text-tiny text-ink-mute whitespace-pre-line mt-0.5">{entry.note}</p>}
+        </div>
+        <button type="button" onClick={() => setEditing(v => !v)} className="eyebrow text-ink-mute hover:text-brick">
+          {editing ? 'Close' : 'Edit'}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => { if (confirm(`Remove ${entry.name} from the Hall of Fame?`)) mutate(removeHallOfFameEntry(entry.id)); }}
+          className="eyebrow text-loss hover:underline disabled:opacity-40"
+        >
+          Remove
+        </button>
+      </div>
+      {editing && (
+        <div className="mt-2 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Name"
+              className="bg-paper-well border border-rule px-2 py-1.5 text-sm" />
+            <input value={form.year} onChange={e => set('year', e.target.value)} placeholder="Class (e.g. #3)"
+              className="bg-paper-well border border-rule px-2 py-1.5 text-sm" />
+            <input value={form.playerName} onChange={e => set('playerName', e.target.value)} placeholder="Player page name"
+              className="bg-paper-well border border-rule px-2 py-1.5 text-sm" />
+          </div>
+          <textarea value={form.note} onChange={e => set('note', e.target.value)} rows={3} placeholder="Citation"
+            className="w-full bg-paper-well border border-rule px-2 py-1.5 text-sm resize-y" />
+          <button
+            type="button"
+            disabled={saving || !form.name.trim()}
+            onClick={async () => { const r = await mutate(updateHallOfFameEntry(entry.id, form)); if (r.ok) setEditing(false); }}
+            className="eyebrow bg-navy text-white px-3 py-2 disabled:opacity-40"
+          >
+            Save
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HallOfFame() {
   const { league, mutate, saving } = useAdminLeague();
   const [form, setForm] = useState({ name: '', year: '', playerName: '', note: '' });
@@ -108,24 +162,7 @@ function HallOfFame() {
         <EmptyNote>Nobody inducted yet.</EmptyNote>
       ) : (
         <div className="row-rule">
-          {entries.map(e => (
-            <div key={e.id} className="flex items-start gap-3 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">
-                  {e.name}{e.year ? <span className="text-ink-mute"> · Class {e.year}</span> : null}
-                </p>
-                {e.note && <p className="text-tiny text-ink-mute whitespace-pre-line mt-0.5">{e.note}</p>}
-              </div>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => { if (confirm(`Remove ${e.name} from the Hall of Fame?`)) mutate(removeHallOfFameEntry(e.id)); }}
-                className="eyebrow text-loss hover:underline disabled:opacity-40"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+          {entries.map(e => <InducteeRow key={e.id} entry={e} saving={saving} mutate={mutate} />)}
         </div>
       )}
     </section>
