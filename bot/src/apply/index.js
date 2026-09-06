@@ -12,7 +12,7 @@ function stripOddsCache(season) {
   return next;
 }
 
-export function applyFinalScore(league, item, nameFor) {
+export function applyFinalScore(league, item, nameFor, actor) {
   const seasonId = activeSeasonId(league);
   let summary = '';
   const next = replaceSeason(league, seasonId, season => {
@@ -45,10 +45,10 @@ export function applyFinalScore(league, item, nameFor) {
       championTeamId: championTeamId !== undefined ? championTeamId : season.championTeamId,
     });
   });
-  return { league: appendAudit(next, 'Score recorded by bot', summary), summary };
+  return { league: appendAudit(next, 'Score recorded by bot', summary, actor), summary };
 }
 
-export function applyGameTime(league, item, nameFor) {
+export function applyGameTime(league, item, nameFor, actor) {
   const seasonId = activeSeasonId(league);
   let summary = '';
   const next = replaceSeason(league, seasonId, season => {
@@ -59,10 +59,10 @@ export function applyGameTime(league, item, nameFor) {
       : 'game time set';
     return { ...season, games };
   });
-  return { league: appendAudit(next, 'Game time set by bot', summary), summary };
+  return { league: appendAudit(next, 'Game time set by bot', summary, actor), summary };
 }
 
-export function applyTrade(league, item, nameFor) {
+export function applyTrade(league, item, nameFor, actor) {
   const seasonId = activeSeasonId(league);
   let summary = '';
   const next = replaceSeason(league, seasonId, season => {
@@ -96,10 +96,10 @@ export function applyTrade(league, item, nameFor) {
     });
     return { ...season, members, activityLog };
   });
-  return { league: appendAudit(next, 'Trade recorded by bot', summary), summary };
+  return { league: appendAudit(next, 'Trade recorded by bot', summary, actor), summary };
 }
 
-export function applySign(league, item, nameFor) {
+export function applySign(league, item, nameFor, actor) {
   const seasonId = activeSeasonId(league);
   let summary = '';
   const next = replaceSeason(league, seasonId, season => {
@@ -119,10 +119,10 @@ export function applySign(league, item, nameFor) {
     const activityLog = appendActivity(season, { type: 'add', teamId: item.teamId, text: summary });
     return { ...season, members, freeAgents, activityLog };
   });
-  return { league: appendAudit(next, 'Signing recorded by bot', summary), summary };
+  return { league: appendAudit(next, 'Signing recorded by bot', summary, actor), summary };
 }
 
-export function applyRelease(league, item, nameFor) {
+export function applyRelease(league, item, nameFor, actor) {
   const seasonId = activeSeasonId(league);
   let summary = '';
   const next = replaceSeason(league, seasonId, season => {
@@ -138,10 +138,10 @@ export function applyRelease(league, item, nameFor) {
     const activityLog = appendActivity(season, { type: 'remove', teamId: owner.teamId, text: summary });
     return { ...season, members, freeAgents, activityLog };
   });
-  return { league: appendAudit(next, 'Release recorded by bot', summary), summary };
+  return { league: appendAudit(next, 'Release recorded by bot', summary, actor), summary };
 }
 
-export function applySuspension(league, item, nameFor) {
+export function applySuspension(league, item, nameFor, actor) {
   const seasonId = activeSeasonId(league);
   let summary = '';
   const next = replaceSeason(league, seasonId, season => {
@@ -174,14 +174,14 @@ export function applySuspension(league, item, nameFor) {
     });
     return { ...season, members, activityLog };
   });
-  return { league: appendAudit(next, suspended(item) ? 'Player suspended by bot' : 'Suspension lifted by bot', summary), summary };
+  return { league: appendAudit(next, suspended(item) ? 'Player suspended by bot' : 'Suspension lifted by bot', summary, actor), summary };
 }
 
 function suspended(item) {
   return item.suspended !== false;
 }
 
-export function applyBan(league, item, nameFor) {
+export function applyBan(league, item, nameFor, actor) {
   const seasonId = activeSeasonId(league);
   let summary = '';
   const banned = item.banned !== false;
@@ -210,10 +210,10 @@ export function applyBan(league, item, nameFor) {
     });
     return { ...season, members, freeAgents, activityLog };
   });
-  return { league: appendAudit(next, banned ? 'Player banned by bot' : 'Ban lifted by bot', summary), summary };
+  return { league: appendAudit(next, banned ? 'Player banned by bot' : 'Ban lifted by bot', summary, actor), summary };
 }
 
-export function applyAwards(league, item) {
+export function applyAwards(league, item, nameFor, actor) {
   const known = league.awardDefs || [];
   const awardDefs = item.newAwardDefs.length > 0 ? [...known, ...item.newAwardDefs] : known;
   const withDefs = { ...league, awardDefs };
@@ -226,7 +226,7 @@ export function applyAwards(league, item) {
     : '';
   const summary = [`${headline}${replaced}`, ...item.roll, ...item.notes].join('\n');
 
-  return { league: appendAudit(next, 'Awards recorded by bot', headline), summary };
+  return { league: appendAudit(next, 'Awards recorded by bot', headline, actor), summary };
 }
 
 export const APPLIERS = {

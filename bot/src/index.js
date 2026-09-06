@@ -236,7 +236,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
       const ctx = await buildContext();
-      const result = await applyResolved({ kind: pending.kind, item, reasons: [], display: {} }, ctx);
+      const result = await applyResolved({ kind: pending.kind, item, reasons: [], display: {} }, ctx, interaction.user.tag);
       if (!result.applied) {
         await closePending(pendingId, 'failed', interaction.user.tag, result.blocked);
         await interaction.editReply({ content: `Did not apply: ${result.blocked}`, embeds: [], components: [] });

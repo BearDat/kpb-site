@@ -77,7 +77,7 @@ function precheck(kind, item, season, league) {
   return null;
 }
 
-export async function applyResolved(resolved, ctx) {
+export async function applyResolved(resolved, ctx, actor = null) {
   const applier = APPLIERS[resolved.kind];
   if (!applier) throw new Error(`no applier for ${resolved.kind}`);
   let blocked = null;
@@ -86,7 +86,7 @@ export async function applyResolved(resolved, ctx) {
     const season = getActiveSeason(league);
     blocked = precheck(resolved.kind, resolved.item, season, league);
     if (blocked) return null;
-    const result = applier(league, resolved.item, ctx.nameFor);
+    const result = applier(league, resolved.item, ctx.nameFor, actor);
     summary = result.summary;
     return result.league;
   });
@@ -97,10 +97,10 @@ export async function applyResolved(resolved, ctx) {
 async function handleResolved(client, resolved, ctx, context) {
   if (resolved.confidence === 'high' && config.autoApply && resolved.item) {
     try {
-      const result = await applyResolved(resolved, ctx);
+      const result = await applyResolved(resolved, ctx, context.authorTag);
       if (result.applied) {
         log.info('applied', { kind: resolved.kind, summary: result.summary });
-        await notifyApplied(client, result.summary, context);
+        await notifyApplied(client, result.summary, context, context.authorTag);
         return { outcome: 'applied', detail: result.summary };
       }
       resolved.reasons.push(result.blocked);

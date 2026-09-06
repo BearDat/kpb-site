@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLeague, usePageTitle } from '../../../lib/LeagueContext';
 import { summaryOf } from '../../../lib/domain/newsBlocks';
 import { SectionHead, EmptyNote } from '../../../components/site/primitives';
+import NewsTabs from '../../../components/site/NewsTabs';
 
 function postDate(at) {
   if (!at) return 'Undated';
@@ -56,6 +57,7 @@ export default function NewsPage() {
 
   return (
     <div>
+      <NewsTabs />
       <SectionHead title="News">
         <span className="eyebrow text-ink-mute pb-0.5">
           {posts.length} {posts.length === 1 ? 'post' : 'posts'}

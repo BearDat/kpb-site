@@ -34,9 +34,23 @@ export default function GameRow({ game, showDate = true }) {
       </div>
       <Side team={game.away} score={game.awayScore} isWinner={decided && !homeWon} decided={decided} />
       <Side team={game.home} score={game.homeScore} isWinner={decided && homeWon} decided={decided} />
-      {showDate && game.gameTimeUTC != null && (
-        <div className="text-tiny text-ink-faint mt-1 pl-3.5">{formatGameDate(game.gameTimeUTC)}</div>
-      )}
+      {(showDate && game.gameTimeUTC != null) || game.streamUrl ? (
+        <div className="flex items-center justify-between gap-2 mt-1 pl-3.5">
+          {showDate && game.gameTimeUTC != null && (
+            <span className="text-tiny text-ink-faint">{formatGameDate(game.gameTimeUTC)}</span>
+          )}
+          {game.streamUrl && (
+            <a
+              href={game.streamUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="eyebrow text-brick hover:underline ml-auto"
+            >
+              Watch ↗
+            </a>
+          )}
+        </div>
+      ) : null}
     </article>
   );
 }

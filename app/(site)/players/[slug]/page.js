@@ -7,6 +7,7 @@ import { useLeague, usePageTitle } from '../../../../lib/LeagueContext';
 import { buildPlayer } from '../../../../lib/domain/player';
 import { outsToIpDisplay } from '../../../../lib/domain/stats';
 import { TeamMark, SectionHead, EmptyNote, TeamLink, cleanDiscordText, pct } from '../../../../components/site/primitives';
+import { MediaItem } from '../../../../components/site/MediaGallery';
 
 function Stat({ label, value }) {
   return (
@@ -73,6 +74,9 @@ export default function PlayerPage() {
   const { current, career, seasons, awards, hallOfFame } = player;
   const batted = seasons.filter(s => s.totals.ab > 0);
   const pitched = seasons.filter(s => s.totals.outs > 0);
+  const highlights = [...(snapshot.highlights || [])]
+    .filter(h => h.playerSlug === slug)
+    .sort((a, b) => (b.at || 0) - (a.at || 0));
 
   return (
     <div>
@@ -162,6 +166,22 @@ export default function PlayerPage() {
                 {pitched.length > 1 && <PitchingRow label="Career" totals={career.totals} pitching={career.pitching} />}
               </tbody>
             </table>
+          </div>
+        </section>
+      )}
+
+      {highlights.length > 0 && (
+        <section className="mb-8">
+          <SectionHead title="Highlights">
+            <span className="eyebrow text-ink-mute pb-0.5">{highlights.length}</span>
+          </SectionHead>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {highlights.map(h => (
+              <div key={h.id}>
+                <MediaItem item={h.media} />
+                <p className="text-sm font-medium mt-1.5">{h.title}</p>
+              </div>
+            ))}
           </div>
         </section>
       )}

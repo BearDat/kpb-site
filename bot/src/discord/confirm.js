@@ -105,13 +105,13 @@ export async function sendReviewDm(client, pendingId, resolved, context) {
   }
 }
 
-export async function notifyApplied(client, summary, context) {
+export async function notifyApplied(client, summary, context, actor) {
   if (!context.announce) return;
   try {
     const user = await client.users.fetch(config.adminUserId);
-    await user.send({
-      embeds: [new EmbedBuilder().setColor(COLOR_OK).setTitle('Applied').setDescription(truncate(summary, 3000))],
-    });
+    const embed = new EmbedBuilder().setColor(COLOR_OK).setTitle('Applied').setDescription(truncate(summary, 3000));
+    if (actor) embed.addFields({ name: 'By', value: truncate(actor, 256) });
+    await user.send({ embeds: [embed] });
   } catch (e) {
     log.debug('applied notice not delivered', { error: e.message });
   }

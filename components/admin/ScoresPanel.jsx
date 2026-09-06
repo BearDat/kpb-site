@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useAdminLeague } from '../../lib/AdminLeagueContext';
 import { useLeague } from '../../lib/LeagueContext';
-import { saveScore, clearScore, declareForfeit, setGameTime } from '../../lib/domain/mutations';
+import { saveScore, clearScore, declareForfeit, setGameTime, setGameStreamUrl } from '../../lib/domain/mutations';
 import { teamDisplayName } from '../../lib/domain/core';
 import { EmptyNote } from '../site/primitives';
 
@@ -20,11 +20,12 @@ function localInputValue(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function GameRow({ game, season, teams, saving, onSave, onClear, onForfeit, onTime }) {
+function GameRow({ game, season, teams, saving, onSave, onClear, onForfeit, onTime, onStreamUrl }) {
   const [away, setAway] = useState(game.awayScore == null ? '' : String(game.awayScore));
   const [home, setHome] = useState(game.homeScore == null ? '' : String(game.homeScore));
   const [innings, setInnings] = useState(game.innings == null ? '' : String(game.innings));
   const [when, setWhen] = useState(localInputValue(game.gameTimeUTC));
+  const [stream, setStream] = useState(game.streamUrl || '');
   const [open, setOpen] = useState(false);
 
   const awayName = teamDisplayName(game.awayTeamId, season, teams);
@@ -83,6 +84,7 @@ function GameRow({ game, season, teams, saving, onSave, onClear, onForfeit, onTi
         </button>
         {game.played && <span className="eyebrow text-win">Final</span>}
         {game.isForfeit && <span className="eyebrow text-brick">FFT</span>}
+        {game.streamUrl && <span className="eyebrow text-brick">Stream</span>}
       </div>
 
       {open && (
@@ -100,6 +102,21 @@ function GameRow({ game, season, teams, saving, onSave, onClear, onForfeit, onTi
             className="eyebrow border border-rule px-2.5 py-1.5 disabled:opacity-40"
           >
             Set time
+          </button>
+          <input
+            value={stream}
+            onChange={e => setStream(e.target.value)}
+            placeholder="Stream link (Twitch/YouTube)"
+            aria-label="Stream link"
+            className="bg-paper-well border border-rule px-2 py-1 text-sm w-56"
+          />
+          <button
+            type="button"
+            disabled={saving || stream.trim() === (game.streamUrl || '')}
+            onClick={() => onStreamUrl(game.id, stream)}
+            className="eyebrow border border-rule px-2.5 py-1.5 disabled:opacity-40"
+          >
+            Save link
           </button>
           <button
             type="button"
@@ -199,6 +216,7 @@ export default function ScoresPanel() {
               onClear={id => mutate(clearScore(season.id, id, seedById))}
               onForfeit={(id, side) => mutate(declareForfeit(season.id, id, side, seedById))}
               onTime={(id, ms) => mutate(setGameTime(season.id, id, ms))}
+              onStreamUrl={(id, url) => mutate(setGameStreamUrl(season.id, id, url))}
             />
           ))}
         </div>

@@ -32,8 +32,8 @@ export function appendActivity(season, entry) {
   return [...(season.activityLog || []), { id: uid('act'), at: Date.now(), ...entry }];
 }
 
-export function appendAudit(league, action, detail) {
-  const entry = { id: uid('audit'), action, detail: detail || '', at: Date.now() };
+export function appendAudit(league, action, detail, actor = null) {
+  const entry = { id: uid('audit'), action, detail: detail || '', actor: actor || null, at: Date.now() };
   return { ...league, auditLog: [...(league.auditLog || []).slice(-99), entry] };
 }
 
