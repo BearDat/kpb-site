@@ -6,6 +6,7 @@ import { useLeague } from '../../lib/LeagueContext';
 import {
   addPlayer, updatePlayer, releasePlayer, signFreeAgent, deleteFreeAgent,
   tradePlayers, setPlayerDiscipline, setRebrand, setMemberActive, removeMember,
+  setMemberDivision,
 } from '../../lib/domain/rosterMutations';
 import { teamDisplayName } from '../../lib/domain/core';
 import { EmptyNote } from '../site/primitives';
@@ -303,6 +304,17 @@ function TeamsTab({ season, teams, mutate, saving }) {
               >
                 {open ? 'Close' : 'Rebrand'}
               </button>
+              {(season.divisions || []).length > 0 && (
+                <select
+                  value={member.divisionId || ''}
+                  disabled={saving}
+                  onChange={e => mutate(setMemberDivision(season.id, member.teamId, e.target.value || null))}
+                  className="bg-paper-well border border-rule px-2 py-1 text-tiny"
+                >
+                  <option value="">No division</option>
+                  {season.divisions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              )}
               <button
                 type="button"
                 disabled={saving}

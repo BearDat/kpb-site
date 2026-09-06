@@ -6,6 +6,7 @@ import { useLeague } from '../../lib/LeagueContext';
 import {
   setSeasonSettings, setActiveSeason, setChampion, addSeason, clearPlayoffs,
   addGame, removeGame, swapHomeAway, generateRoundRobin,
+  addDivision, renameDivision, removeDivision,
 } from '../../lib/domain/rosterMutations';
 import { teamDisplayName } from '../../lib/domain/core';
 import { EmptyNote } from '../site/primitives';
@@ -95,6 +96,52 @@ function Settings({ season, mutate, saving }) {
           Save settings
         </button>
       </div>
+    </section>
+  );
+}
+
+function Divisions({ season, mutate, saving }) {
+  const [name, setName] = useState('');
+  const divisions = season.divisions || [];
+
+  return (
+    <section className="card mt-6">
+      <h2 className="headline text-lg px-3 py-2.5 border-b border-rule-strong">Divisions</h2>
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-rule">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Division name (e.g. East)"
+          className="flex-1 bg-paper-well border border-rule px-2 py-1.5 text-sm" />
+        <button
+          type="button"
+          disabled={saving || !name.trim()}
+          onClick={async () => { const r = await mutate(addDivision(season.id, name)); if (r.ok) setName(''); }}
+          className="eyebrow bg-navy text-white px-3 py-2 disabled:opacity-40"
+        >
+          Add division
+        </button>
+      </div>
+      {divisions.length === 0 ? (
+        <EmptyNote>No divisions yet — assign teams to a division from the Roster tab's Teams list once one exists.</EmptyNote>
+      ) : (
+        <div className="row-rule">
+          {divisions.map(d => (
+            <div key={d.id} className="flex items-center gap-2 px-3 py-2.5">
+              <input
+                defaultValue={d.name}
+                onBlur={e => { if (e.target.value.trim() && e.target.value.trim() !== d.name) mutate(renameDivision(season.id, d.id, e.target.value)); }}
+                className="flex-1 bg-paper-well border border-rule px-2 py-1.5 text-sm"
+              />
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => { if (confirm(`Remove "${d.name}"? Teams in it become unassigned.`)) mutate(removeDivision(season.id, d.id)); }}
+                className="eyebrow text-loss hover:underline disabled:opacity-40"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -256,6 +303,7 @@ export default function SeasonPanel() {
   return (
     <div>
       <Settings season={season} mutate={mutate} saving={saving} />
+      <Divisions season={season} mutate={mutate} saving={saving} />
       <Schedule season={season} teams={teams} mutate={mutate} saving={saving} />
       <Seasons league={league} season={season} teams={teams} mutate={mutate} saving={saving} />
     </div>
