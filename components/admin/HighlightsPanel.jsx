@@ -19,6 +19,15 @@ function when(at) {
   }).format(new Date(at));
 }
 
+function toDateInputValue(at) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(at || Date.now()));
+}
+
+function dateInputToAt(dateStr) {
+  const ms = Date.parse(`${dateStr}T12:00:00Z`);
+  return Number.isNaN(ms) ? Date.now() : ms;
+}
+
 function PlayerPicker({ value, onChange, knownSlugs }) {
   const [open, setOpen] = useState(false);
   const matches = value.trim()
@@ -57,6 +66,7 @@ function NewHighlightForm({ knownSlugs }) {
   const [title, setTitle] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [link, setLink] = useState('');
+  const [date, setDate] = useState(() => toDateInputValue(Date.now()));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
@@ -72,9 +82,10 @@ function NewHighlightForm({ knownSlugs }) {
       playerName: playerName.trim() || null,
       playerSlug: resolvedSlug,
       media,
+      at: dateInputToAt(date),
     }));
     if (result.ok) {
-      setTitle(''); setPlayerName(''); setLink('');
+      setTitle(''); setPlayerName(''); setLink(''); setDate(toDateInputValue(Date.now()));
       if (fileRef.current) fileRef.current.value = '';
     } else if (!result.conflict) {
       setError(result.error || 'Could not save that highlight.');
@@ -95,9 +106,10 @@ function NewHighlightForm({ knownSlugs }) {
         playerName: playerName.trim() || null,
         playerSlug: resolvedSlug,
         media: item,
+        at: dateInputToAt(date),
       }));
       if (result.ok) {
-        setTitle(''); setPlayerName('');
+        setTitle(''); setPlayerName(''); setDate(toDateInputValue(Date.now()));
         if (fileRef.current) fileRef.current.value = '';
       } else {
         await deleteStoredMedia(item).catch(() => {});
@@ -146,6 +158,16 @@ function NewHighlightForm({ knownSlugs }) {
           className="w-full bg-paper-well border border-rule px-2 py-1.5 text-sm"
         />
         <PlayerPicker value={playerName} onChange={setPlayerName} knownSlugs={knownSlugs} />
+        <div>
+          <label className="eyebrow text-ink-mute block mb-1">Date it happened</label>
+          <input
+            type="date"
+            value={date}
+            onChange={e => setDate(e.target.value)}
+            className="bg-paper-well border border-rule px-2 py-1.5 text-sm"
+          />
+          <span className="text-tiny text-ink-faint ml-2">Set this to an earlier date so older clips don't jump to the top.</span>
+        </div>
         {playerName.trim() && !linkedKnown && (
           <p className="text-tiny text-brick">
             No player named "{playerName.trim()}" was found on a roster — the highlight will still save, but won't link to a player page.
@@ -189,6 +211,7 @@ function NewHighlightForm({ knownSlugs }) {
 function HighlightRow({ highlight, saving, onRemove, onRelink, knownSlugs }) {
   const [editing, setEditing] = useState(false);
   const [playerName, setPlayerName] = useState(highlight.playerName || '');
+  const [date, setDate] = useState(() => toDateInputValue(highlight.at));
 
   return (
     <div>
@@ -214,13 +237,22 @@ function HighlightRow({ highlight, saving, onRemove, onRelink, knownSlugs }) {
       {editing && (
         <div className="px-3 pb-3 space-y-2">
           <PlayerPicker value={playerName} onChange={setPlayerName} knownSlugs={knownSlugs} />
+          <div>
+            <label className="eyebrow text-ink-mute block mb-1">Date it happened</label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="bg-paper-well border border-rule px-2 py-1.5 text-sm"
+            />
+          </div>
           <button
             type="button"
             disabled={saving}
-            onClick={() => onRelink(highlight.id, playerName)}
+            onClick={() => onRelink(highlight.id, playerName, dateInputToAt(date))}
             className="eyebrow border border-rule px-2.5 py-1.5 disabled:opacity-40"
           >
-            Save player link
+            Save changes
           </button>
           <div className="pt-1 max-w-sm">
             <MediaItem item={highlight.media} />
@@ -247,9 +279,10 @@ export default function HighlightsPanel() {
     }
   };
 
-  const relink = (id, name) => mutate(updateHighlight(id, {
+  const relink = (id, name, at) => mutate(updateHighlight(id, {
     playerName: name.trim() || null,
     playerSlug: name.trim() ? playerSlug(name) : null,
+    ...(at ? { at } : {}),
   }));
 
   return (
