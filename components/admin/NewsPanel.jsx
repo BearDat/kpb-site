@@ -106,7 +106,7 @@ function MediaManager({ post }) {
         <input
           value={link}
           onChange={e => setLink(e.target.value)}
-          placeholder="or paste a YouTube / Streamable link"
+          placeholder="or paste a YouTube / Streamable / Medal link"
           className="flex-1 bg-paper-well border border-rule px-2 py-1.5 text-sm"
         />
         <button
