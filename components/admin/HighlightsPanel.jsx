@@ -8,7 +8,7 @@ import {
 } from '../../lib/domain/mutations';
 import { playerSlug, playerSlugIndex } from '../../lib/domain/awards';
 import { uploadHighlightMedia, deleteStoredMedia } from '../../lib/mediaUpload';
-import { classifyLink, formatBytes, ACCEPTED_UPLOAD, MAX_UPLOAD_BYTES } from '../../lib/media';
+import { resolveLinkMedia, formatBytes, ACCEPTED_UPLOAD, MAX_UPLOAD_BYTES } from '../../lib/media';
 import { MediaItem } from '../site/MediaGallery';
 import { EmptyNote } from '../site/primitives';
 
@@ -111,22 +111,27 @@ function NewHighlightForm({ knownSlugs }) {
 
   const onLink = async () => {
     setError(null);
-    const parsed = classifyLink(link);
-    if (!parsed) {
-      setError('That does not look like a link. Paste a full https:// URL.');
-      return;
-    }
     setBusy(true);
-    const item = {
-      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-      kind: parsed.kind,
-      provider: parsed.provider,
-      url: parsed.url,
-      embedUrl: parsed.embedUrl || null,
-      name: title.trim() || (parsed.provider === 'link' ? parsed.url : `${parsed.provider} clip`),
-      at: Date.now(),
-    };
-    await publish(item);
+    try {
+      const parsed = await resolveLinkMedia(link);
+      if (!parsed) {
+        setError('That does not look like a link. Paste a full https:// URL.');
+        setBusy(false);
+        return;
+      }
+      const item = {
+        id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        kind: parsed.kind,
+        provider: parsed.provider,
+        url: parsed.url,
+        embedUrl: parsed.embedUrl || null,
+        name: title.trim() || (parsed.provider === 'link' ? parsed.url : `${parsed.provider} clip`),
+        at: Date.now(),
+      };
+      await publish(item);
+    } catch (e) {
+      setError(e.message);
+    }
     setBusy(false);
   };
 
