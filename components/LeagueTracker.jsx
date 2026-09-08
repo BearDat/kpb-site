@@ -606,6 +606,38 @@ function parseRosterSheetCsv(text) {
       blocks.push({ teamName, players });
     }
   }
+  if (blocks.length > 0) return blocks;
+  // Didn't find any explicit "Team | Name | Stars" headers — try the plainer
+  // layout instead: one column per team, no header labels at all, just the
+  // team's name in the first row of each section and a bare username per
+  // row underneath it. Falls back here rather than always running so a
+  // sheet that does have Team/Stars headers never gets double-parsed.
+  return parseColumnRosterSheet(rows);
+}
+// Parses the plain "one team per column" layout: a row of team names,
+// followed by rows of bare usernames (one per column, blank cells are just
+// unfilled roster slots), until a fully blank row. Several such sections
+// can be stacked in the same sheet (a blank row in between, then a new row
+// of team names reusing the same or different columns) — a blank row is
+// what tells this apart from the "Team | Name | Stars" format above, which
+// needs no separator since each block declares its own header inline.
+function parseColumnRosterSheet(rows) {
+  const blocks = [];
+  let columns = null;
+  let expectHeader = true;
+  for (const row of rows) {
+    if (row.every(cell => !cell)) { expectHeader = true; continue; }
+    if (expectHeader) {
+      columns = row.map(name => (name ? { teamName: name, players: [] } : null));
+      blocks.push(...columns.filter(Boolean));
+      expectHeader = false;
+      continue;
+    }
+    if (!columns) continue; // stray data before any header row — nothing to attach it to
+    row.forEach((cell, c) => {
+      if (cell && columns[c]) columns[c].players.push({ role: '', name: cell, starLevel: null });
+    });
+  }
   return blocks;
 }
 
@@ -4339,7 +4371,7 @@ function TeamsView({ season, teamsById, teamsIndex, addExistingTeam, createAndAd
         <SectionTitle accent={PRIMARY} right={<button onClick={() => setShowSheetImport(v => !v)} disabled={!isLoggedIn} className="text-[11px] font-bold disabled:opacity-40" style={{ color: PRIMARY }}>{showSheetImport ? 'Hide' : 'Import'}</button>}>Import a full roster sheet</SectionTitle>
         {showSheetImport && isLoggedIn && (
           <div className="px-4 pb-3 space-y-2">
-            <p className="text-xs" style={{ color: CHALK_DIM }}>Paste or upload a CSV export of a roster spreadsheet with several teams laid out side by side (Role, Username, Stars columns per team). Teams are matched by name — new ones are created automatically. Re-importing replaces each matched team's roster with what's in the sheet, so it always matches exactly (no duplicate or stale players left behind).</p>
+            <p className="text-xs" style={{ color: CHALK_DIM }}>Paste or upload a CSV export of a roster spreadsheet with several teams laid out side by side — either "Team | Role | Username | Stars" blocks, or just a team name in the header row with a bare username per row underneath it (several such sections can be stacked, separated by a blank row). Teams are matched by name — new ones are created automatically. Re-importing replaces each matched team's roster with what's in the sheet, so it always matches exactly (no duplicate or stale players left behind).</p>
             <label className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold cursor-pointer" style={{ background: PANEL2, color: CHALK, border: `1px solid ${LINE}` }}>
               <Upload size={14} /> Choose .csv file
               <input type="file" accept=".csv,.txt" className="hidden" onChange={handleSheetFile} />
@@ -4349,7 +4381,7 @@ function TeamsView({ season, teamsById, teamsIndex, addExistingTeam, createAndAd
             {sheetPreview && (
               <div className="rounded-lg border" style={{ borderColor: LINE }}>
                 {sheetPreview.length === 0 ? (
-                  <p className="px-3 py-3 text-xs" style={{ color: NEGATIVE }}>Couldn't find any "Team | Name | Stars" style blocks in that file. Double check the header row text matches exactly.</p>
+                  <p className="px-3 py-3 text-xs" style={{ color: NEGATIVE }}>Couldn't find any team blocks in that file — check that each team has a header row (either "Team | Name | Stars" labels, or just the team's name) followed by its players.</p>
                 ) : (
                   <>
                     <div className="max-h-56 overflow-y-auto divide-y" style={{ borderColor: LINE }}>
