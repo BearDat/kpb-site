@@ -67,23 +67,41 @@ banners, and admin management.
 
 ## News media
 
-News images and highlight clips live in a Supabase Storage bucket called
-`media`, not in the league blob. The blob only carries the URL.
+News images and highlight clips live in **Vercel Blob**, not Supabase — only
+the resulting URL is stored in the league blob. They used to live in a
+Supabase Storage bucket (`supabase/storage.sql`, now unused by new uploads),
+but Supabase bills egress on every byte served from Storage with no CDN layer
+of ours in front of it, so a handful of highlight clips getting watched a few
+hundred times was enough to threaten the free plan's 5GB/month egress limit.
+Vercel Blob's bandwidth comes out of the project's own Vercel plan instead.
 
-That split matters: media used to be base64 data URIs inside the league JSON,
-which meant two news images accounted for more than half of a 1.58 MB blob, and
-every unrelated write — a bot score, an admin save — rewrote all of it under
-compare-and-swap. Video was impossible outright.
+That split (media as a URL, not inline) matters on its own too: media used to
+be base64 data URIs inside the league JSON, which meant two news images
+accounted for more than half of a 1.58 MB blob, and every unrelated write — a
+bot score, an admin save — rewrote all of it under compare-and-swap. Video was
+impossible outright.
 
-**Run `supabase/storage.sql` once in the SQL editor before uploading anything.**
-The bucket itself already exists, but `storage.objects` has row-level security
-on with no policies by default, so an upload from the browser is rejected until
-that file adds them. The admin panel says exactly that if it hits the case.
+**Connect a Blob store before uploading anything**: Vercel dashboard -> the
+project -> Storage -> Create Database -> Blob. Vercel auto-injects
+`BLOB_READ_WRITE_TOKEN` into the project's env vars once it's connected — nothing
+to copy by hand in production. For local dev, run `vercel env pull .env.local`
+afterward to get it into your `.env.local`.
 
-Uploads go straight from the browser to Storage rather than through a Next.js
+Uploads go straight from the browser to Blob rather than through a Next.js
 route, because serverless request bodies are capped at a few megabytes and a
-highlight clip is far larger than that. The bucket is capped at 50 MB per file
-and limited to image and video MIME types.
+highlight clip is far larger than that — `/api/blob-upload-token` only hands
+out a short-lived upload token (after checking the request carries a valid
+Supabase session, the same "any admin account" rule Storage's RLS used to
+enforce) and never sees the file itself. Deleting a file does go through a
+route (`/api/blob-delete`), since only the server holds the token that can
+authorize a delete. Uploads are capped at 50 MB per file and limited to image
+and video MIME types (both enforced by the upload-token route, not just the
+client).
+
+The 7 files already sitting in the old Supabase `media` bucket from before
+this switch were left in place rather than migrated — they're tiny (~64MB
+total) and still serve fine from their existing URLs. Only new uploads go to
+Blob.
 
 Each post keeps a hero `imageUrl` — what the home page and news cards show —
 plus a `media` array of everything attached. Uploaded files and pasted links
