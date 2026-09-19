@@ -36,6 +36,85 @@ either side of the wire. Anything that needs the raw league blob — admin
 writes, anything with images — belongs in `/classic`, which still talks to
 Supabase directly.
 
+## Deploying (Cloudflare Workers)
+
+This app runs on Cloudflare Workers via the [OpenNext adapter](https://opennext.js.org/cloudflare)
+(`@opennextjs/cloudflare`), not Vercel. Two things moved off Vercel/Supabase
+for the same reason: both bill for bandwidth once you're past a free tier,
+and this is a media-serving site. Cloudflare's Workers bandwidth and R2's
+egress are both free at any volume, so there's no metered-bandwidth line
+item left that a popular clip or a traffic spike can run up.
+
+Cloudflare currently recommends a newer tool called `vinext` over OpenNext
+for *new* Next.js-on-Workers projects, but it's beta, requires Next.js 16 and
+React 19.2.6+, and reimplements the Next.js API surface on Vite rather than
+adapting the standard `next build` output. That's a much bigger, riskier
+change than this project needed — OpenNext stays fully supported for an app
+already on Next 15/React 18, so that's what this uses. Worth revisiting if
+this app's Next.js version gets upgraded separately later.
+
+**One-time Cloudflare setup** (dashboard, not code):
+1. Enable R2 on the account (Dashboard → R2 → it'll prompt you once; no cost
+   to enable, you only pay if you exceed the free tier — see the pricing note
+   below).
+2. Create an R2 bucket named `kpb-media` (or update the `bucket_name` in
+   `wrangler.jsonc` to match whatever you name it).
+3. Create a KV namespace for the page cache (Workers & Pages → KV) and put
+   its ID into the `kv_namespaces` entry in `wrangler.jsonc`.
+
+**wrangler.jsonc** wires those up as bindings (`MEDIA_BUCKET` for R2,
+`NEXT_INC_CACHE_KV` for KV — that second name is required exactly as-is,
+it's what `@opennextjs/cloudflare`'s KV cache implementation looks for). The
+KV namespace is what makes `revalidate = 60` on the public pages actually
+mean something on Workers — without it every cold isolate starts with an
+empty cache and Supabase gets hit far more often than once a minute.
+
+**Environment variables** work differently than on Vercel because Next.js
+still needs `NEXT_PUBLIC_*` values baked into the client bundle at *build*
+time, not just available at request time:
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LEAGUE_ID`
+  must be present as real env vars (a `.env.local` file, same as today)
+  wherever `npm run cf:build` actually runs.
+- Server-only values (`DISCORD_*` webhooks/tokens, `MAINTENANCE_MODE`,
+  `MAINTENANCE_BYPASS_SECRET`) are only ever read at request time, so they
+  go in via `wrangler secret put <NAME>` (or the dashboard's Variables tab)
+  after the Worker exists, same as Vercel's env var settings today.
+
+**Commands:**
+- `npm run cf:build` — builds Next.js, then adapts the output for Workers
+  into `.open-next/`.
+- `npm run cf:preview` — builds, then serves it locally with `wrangler dev`
+  against local-emulated bindings (a throwaway local R2/KV, not the real
+  ones) — good for a final check before deploying.
+- `npm run cf:deploy` — builds, then pushes it live with `wrangler deploy`.
+  Needs `wrangler login` run once first (or `CLOUDFLARE_API_TOKEN` set, for
+  CI).
+
+**Local dev** (`npm run dev`) still works exactly as before — the
+`initOpenNextCloudflareForDev()` call in `next.config.js` gives `next dev`
+access to local-emulated R2/KV bindings too, so admin uploads work without
+needing the full Workers build.
+
+**Cloudflare R2 pricing, so "why isn't this going to cost money" isn't just
+asserted:** free tier is 10 GB storage, 1,000,000 write ops/month, 10,000,000
+read ops/month — and egress (bandwidth to viewers) is **free, unmetered, on
+every plan, forever**, which is the one line item that actually mattered
+here. This project's media footprint is under 100 MB total, so storage and
+operations aren't in reach of the free tier either.
+
+**Domain cutover** (do this last, once a deploy is verified working on its
+own `*.workers.dev` URL): the custom domain's DNS has to point at Cloudflare
+instead of Vercel. If the domain's nameservers are already Vercel's
+(`ns1/ns2.vercel-dns.com`), that means Vercel is the DNS host for the whole
+zone, not just one record — check whether the domain is registered through
+Vercel or elsewhere with nameservers pointed at Vercel (Vercel account →
+Domains tells you which), then either edit nameservers there or at the
+original registrar to Cloudflare's, after adding the domain as a site in
+Cloudflare first (which auto-imports the existing DNS records so nothing
+else on the domain — email, other subdomains — breaks in the switch).
+Flip on [maintenance mode](#maintenance-mode) immediately before doing this,
+since there's a window where DNS is propagating.
+
 ## Admin
 
 `/admin` is the staff surface on the new site: the bot review queue and emoji
@@ -67,41 +146,36 @@ banners, and admin management.
 
 ## News media
 
-News images and highlight clips live in **Vercel Blob**, not Supabase — only
-the resulting URL is stored in the league blob. They used to live in a
-Supabase Storage bucket (`supabase/storage.sql`, now unused by new uploads),
-but Supabase bills egress on every byte served from Storage with no CDN layer
-of ours in front of it, so a handful of highlight clips getting watched a few
-hundred times was enough to threaten the free plan's 5GB/month egress limit.
-Vercel Blob's bandwidth comes out of the project's own Vercel plan instead.
+News images and highlight clips live in a **Cloudflare R2** bucket (`kpb-media`),
+not Supabase — only the resulting URL is stored in the league blob. They've
+lived in three places over this project's life: originally base64 data URIs
+inside the league JSON itself (two news images accounted for more than half
+of a 1.58 MB blob, and every unrelated write — a bot score, an admin save —
+rewrote all of it under compare-and-swap; video was impossible outright),
+then a Supabase Storage bucket, then briefly Vercel Blob. Both of the latter
+two bill for egress bandwidth once you're past their free tier, and a
+site-hosted video getting watched a few hundred times is enough to hit
+those. R2 charges nothing for egress, ever, at any usage level — see
+"Why Cloudflare" below.
 
-That split (media as a URL, not inline) matters on its own too: media used to
-be base64 data URIs inside the league JSON, which meant two news images
-accounted for more than half of a 1.58 MB blob, and every unrelated write — a
-bot score, an admin save — rewrote all of it under compare-and-swap. Video was
-impossible outright.
+Uploads go through a Next.js route (`/api/media-upload`) rather than
+straight from the browser to storage: Workers requests can carry a far
+larger body than a Vercel serverless function's few-MB cap, so there's no
+need for Vercel Blob's client-side-direct-upload-token dance. The route
+checks the request carries a valid Supabase session (the same "any admin
+account" rule Storage's RLS used to enforce) before writing to the
+`MEDIA_BUCKET` R2 binding, and enforces the 50 MB/file, image-or-video-only
+limits itself rather than trusting the client. Serving is its own route too
+(`/media/[...path]`), reading straight off the same binding with a
+year-long immutable `Cache-Control` (every key already has a random suffix,
+so a re-upload never collides with an old cached copy). Deleting goes
+through `/api/media-delete`, same auth check, since only the server holds
+the binding that can authorize one.
 
-**Connect a Blob store before uploading anything**: Vercel dashboard -> the
-project -> Storage -> Create Database -> Blob. Vercel auto-injects
-`BLOB_READ_WRITE_TOKEN` into the project's env vars once it's connected — nothing
-to copy by hand in production. For local dev, run `vercel env pull .env.local`
-afterward to get it into your `.env.local`.
-
-Uploads go straight from the browser to Blob rather than through a Next.js
-route, because serverless request bodies are capped at a few megabytes and a
-highlight clip is far larger than that — `/api/blob-upload-token` only hands
-out a short-lived upload token (after checking the request carries a valid
-Supabase session, the same "any admin account" rule Storage's RLS used to
-enforce) and never sees the file itself. Deleting a file does go through a
-route (`/api/blob-delete`), since only the server holds the token that can
-authorize a delete. Uploads are capped at 50 MB per file and limited to image
-and video MIME types (both enforced by the upload-token route, not just the
-client).
-
-The 7 files already sitting in the old Supabase `media` bucket from before
-this switch were left in place rather than migrated — they're tiny (~64MB
-total) and still serve fine from their existing URLs. Only new uploads go to
-Blob.
+The files already sitting in the old Supabase `media` bucket and in Vercel
+Blob from before these switches were left in place rather than migrated —
+small enough not to matter, and it avoids rewriting existing highlight/news
+URLs. Only new uploads go to R2.
 
 Each post keeps a hero `imageUrl` — what the home page and news cards show —
 plus a `media` array of everything attached. Uploaded files and pasted links
