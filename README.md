@@ -126,6 +126,31 @@ https, and only YouTube and Streamable are ever put in an iframe.
 Posts written before blocks existed still render: `normalizeBlocks` splits a
 legacy `body` string on blank lines into paragraphs, so nothing needs migrating.
 
+## Maintenance mode
+
+Set `MAINTENANCE_MODE=true` (any deploy env var, not the database) to show a
+full-page "down for maintenance" screen to every visitor instead of the real
+site. It's an env var and not an admin-panel toggle on purpose: it needs to
+keep working even when the thing that's actually down is Supabase itself (or
+whatever host/database migration prompted turning it on in the first place),
+so it can't depend on a successful read from either.
+
+`middleware.js` checks the flag on every request and rewrites to
+`app/maintenance/page.js` — a standalone page outside the `(site)` route
+group, so it renders without calling `getSnapshot()` or touching Supabase at
+all. `/api/*` is excluded from the rewrite, so webhooks (Discord interactions,
+feedback, admin-notify) and anything else hitting the API keep working while
+the public pages show maintenance.
+
+To keep working on the real site while it's flipped on for everyone else, set
+`MAINTENANCE_BYPASS_SECRET` to some random string and visit any page once
+with `?bypass=<that secret>` — that sets a 12-hour cookie so you don't need
+the query param on every link after that. Leave it blank to disable the
+bypass entirely.
+
+Turn it back off the same way: set `MAINTENANCE_MODE=false` (or unset it) and
+redeploy.
+
 ## A note on concurrent writes
 
 `/classic` used to write its whole in-memory league blob to Supabase as a blind
