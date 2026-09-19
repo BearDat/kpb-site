@@ -90,6 +90,25 @@ time, not just available at request time:
   Needs `wrangler login` run once first (or `CLOUDFLARE_API_TOKEN` set, for
   CI).
 
+**Auto-deploy on push** (`.github/workflows/deploy.yml`): every push to `main`
+builds and deploys to Cloudflare automatically, the same way Vercel used to.
+Add these as repo secrets (Settings → Secrets and variables → Actions →
+New repository secret) before the workflow will actually work:
+- `CLOUDFLARE_API_TOKEN` — a token scoped with the **Edit Cloudflare
+  Workers** template (dashboard → My Profile → API Tokens → Create Token).
+  Use a token dedicated to CI rather than reusing one you also run locally,
+  so revoking one doesn't break the other.
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `NEXT_PUBLIC_LEAGUE_ID` — same values as your local `.env.local`. These
+  have to be GitHub secrets (not just Cloudflare secrets set later) because
+  they're baked into the client bundle at build time, and the build runs on
+  GitHub's runner, not on Cloudflare.
+
+Nothing else (Discord tokens, `MAINTENANCE_MODE`, etc.) needs to be a GitHub
+secret — those are read at request time by the deployed Worker, so they only
+ever need setting once via `wrangler secret put` or the dashboard, not on
+every deploy.
+
 **Local dev** (`npm run dev`) still works exactly as before — the
 `initOpenNextCloudflareForDev()` call in `next.config.js` gives `next dev`
 access to local-emulated R2/KV bindings too, so admin uploads work without
