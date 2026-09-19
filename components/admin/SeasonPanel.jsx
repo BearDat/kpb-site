@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 import { useAdminLeague } from '../../lib/AdminLeagueContext';
 import { useLeague } from '../../lib/LeagueContext';
 import {
   setSeasonSettings, setActiveSeason, setChampion, addSeason, clearPlayoffs,
   addGame, removeGame, swapHomeAway, generateRoundRobin,
-  addDivision, renameDivision, removeDivision,
+  addDivision, renameDivision, removeDivision, moveSeason,
 } from '../../lib/domain/rosterMutations';
 import { teamDisplayName } from '../../lib/domain/core';
 import { EmptyNote } from '../site/primitives';
@@ -151,6 +152,9 @@ function Seasons({ league, season, teams, mutate, saving }) {
   return (
     <section className="card mt-6">
       <h2 className="headline text-lg px-3 py-2.5 border-b border-rule-strong">Seasons</h2>
+      <p className="text-xs text-ink-mute px-3 pt-2.5">
+        This order is what the public site shows everywhere seasons are listed — use the arrows to move a season (like a WBC tournament) wherever you want it instead of leaving it where it was created.
+      </p>
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-rule">
         <input value={name} onChange={e => setName(e.target.value)} placeholder="New season name"
           className="flex-1 bg-paper-well border border-rule px-2 py-1.5 text-sm" />
@@ -164,11 +168,32 @@ function Seasons({ league, season, teams, mutate, saving }) {
         </button>
       </div>
       <div className="row-rule">
-        {(league.seasons || []).map(s => {
+        {(league.seasons || []).map((s, i) => {
           const active = s.id === league.activeSeasonId;
           const champ = s.championTeamId ? teamDisplayName(s.championTeamId, s, teams) : null;
+          const seasonCount = (league.seasons || []).length;
           return (
             <div key={s.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+              <div className="flex flex-col -my-1">
+                <button
+                  type="button"
+                  disabled={saving || i === 0}
+                  onClick={() => mutate(moveSeason(s.id, 'up'))}
+                  aria-label={`Move ${s.name} up`}
+                  className="text-ink-mute hover:text-brick disabled:opacity-25 disabled:hover:text-ink-mute"
+                >
+                  <ChevronUp size={14} />
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || i === seasonCount - 1}
+                  onClick={() => mutate(moveSeason(s.id, 'down'))}
+                  aria-label={`Move ${s.name} down`}
+                  className="text-ink-mute hover:text-brick disabled:opacity-25 disabled:hover:text-ink-mute"
+                >
+                  <ChevronDown size={14} />
+                </button>
+              </div>
               <span className="text-sm font-medium flex-1 min-w-[8rem] truncate">
                 {s.name}{active && <span className="eyebrow text-win ml-2">Active</span>}
               </span>
