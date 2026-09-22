@@ -29,6 +29,8 @@ function Settings({ season, mutate, saving }) {
     seriesLengths: (s.seriesLengths || []).join(', '),
     reseedPlayoffs: !!s.reseedPlayoffs,
     scheduleMode: s.scheduleMode || 'date',
+    playoffFormat: s.playoffFormat || 'overall',
+    groupAdvanceCount: s.groupAdvanceCount ?? 2,
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -78,6 +80,37 @@ function Settings({ season, mutate, saving }) {
           Reseed each playoff round by standing
         </label>
 
+        <div>
+          <span className="eyebrow text-ink-mute block mb-1">Playoff seeding</span>
+          <p className="text-tiny text-ink-mute mb-1.5">
+            Divisional gives each division's leader a guaranteed seed, then fills the rest with wild cards by record.
+            Group-based treats divisions as pool-play groups and advances the top finishers from every group before any wild cards (needs divisions set up in Teams).
+          </p>
+          <div className="flex rounded overflow-hidden border border-rule w-fit">
+            {[['overall', 'Overall'], ['divisional', 'Divisional'], ['wbc', 'Group-based']].map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => set('playoffFormat', m)}
+                className={`px-2.5 py-1.5 text-xs font-semibold ${form.playoffFormat === m ? 'bg-navy text-white' : 'text-ink-mute'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {form.playoffFormat === 'wbc' && (
+            <label className="flex items-center justify-between gap-2 mt-2 max-w-xs">
+              <span className="text-sm">Advance per group</span>
+              <input
+                value={form.groupAdvanceCount}
+                onChange={e => set('groupAdvanceCount', e.target.value)}
+                inputMode="numeric"
+                className="w-16 bg-paper-well border border-rule px-2 py-1.5 text-sm stat text-right"
+              />
+            </label>
+          )}
+        </div>
+
         <button
           type="button"
           disabled={saving}
@@ -91,6 +124,8 @@ function Settings({ season, mutate, saving }) {
               : undefined,
             reseedPlayoffs: form.reseedPlayoffs,
             scheduleMode: form.scheduleMode,
+            playoffFormat: form.playoffFormat,
+            groupAdvanceCount: form.groupAdvanceCount === '' ? undefined : Number(form.groupAdvanceCount),
           }))}
           className="eyebrow bg-navy text-white px-3 py-2 disabled:opacity-40"
         >
