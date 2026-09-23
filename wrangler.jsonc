@@ -21,6 +21,10 @@
     {
       "binding": "NEXT_INC_CACHE_KV",
       "id": "4ea8958db5d74e689d9fa375777c3301"
+    },
+    {
+      "binding": "SNAPSHOT_CACHE",
+      "id": "6d8e4ad0dc00430db768a206731cc72d"
     }
   ]
 }

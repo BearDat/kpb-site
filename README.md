@@ -13,8 +13,14 @@ the `/api/team-logo/[teamId]` proxy, which already served logos with an ETag.
 That takes 1.6 MB down to ~240 KB, about 37 KB over the wire.
 
 `app/api/league-snapshot` serves it with `s-maxage=60`, and `getSnapshot()`
-memoises it in-process for the same 60 seconds, so the origin does the work at
-most once a minute no matter how many people are watching.
+caches it for the same 60 seconds so the origin does the work at most once a
+minute no matter how many people are watching. That cache has two layers: an
+in-process variable (fast, but scoped to a single Worker isolate) and a
+Cloudflare KV namespace (`SNAPSHOT_CACHE`, shared across every isolate/colo).
+The KV layer is the one that actually matters on Workers — without it, a
+route marked `force-dynamic` with a client that polls on `cache: 'no-store'`
+gets re-executed independently in every colo handling traffic, and the
+in-memory cache alone barely dedupes anything.
 
 `lib/LeagueContext.jsx` is the client half. The site layout renders the snapshot
 into `<LeagueProvider initial={…}>` so the first paint has real data with no
@@ -60,14 +66,23 @@ this app's Next.js version gets upgraded separately later.
 2. Create an R2 bucket named `kpb-media` (or update the `bucket_name` in
    `wrangler.jsonc` to match whatever you name it).
 3. Create a KV namespace for the page cache (Workers & Pages → KV) and put
-   its ID into the `kv_namespaces` entry in `wrangler.jsonc`.
+   its ID into the `NEXT_INC_CACHE_KV` entry in `wrangler.jsonc`.
+4. Create a second KV namespace for the league snapshot cache and put its ID
+   into the `SNAPSHOT_CACHE` entry in `wrangler.jsonc`.
 
 **wrangler.jsonc** wires those up as bindings (`MEDIA_BUCKET` for R2,
-`NEXT_INC_CACHE_KV` for KV — that second name is required exactly as-is,
-it's what `@opennextjs/cloudflare`'s KV cache implementation looks for). The
-KV namespace is what makes `revalidate = 60` on the public pages actually
-mean something on Workers — without it every cold isolate starts with an
-empty cache and Supabase gets hit far more often than once a minute.
+`NEXT_INC_CACHE_KV` for KV — that name is required exactly as-is, it's what
+`@opennextjs/cloudflare`'s KV cache implementation looks for). The
+`NEXT_INC_CACHE_KV` namespace is what makes `revalidate = 60` on the public
+pages actually mean something on Workers — without it every cold isolate
+starts with an empty cache and Supabase gets hit far more often than once a
+minute.
+
+`SNAPSHOT_CACHE` (an app-defined binding, any name works) backs the same
+idea for `/api/league-snapshot`, which is `force-dynamic` and can't use the
+page cache at all: `lib/snapshot.js` reads/writes the built snapshot there
+with a 60-second TTL so every Worker isolate/colo shares one cache instead of
+each hitting Supabase independently on every client poll.
 
 **Environment variables** work differently than on Vercel because Next.js
 still needs `NEXT_PUBLIC_*` values baked into the client bundle at *build*
