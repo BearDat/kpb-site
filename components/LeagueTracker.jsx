@@ -4685,20 +4685,9 @@ function normalizeStatRow(row, extra) {
   };
 }
 
-// A "career" spans season-roster entries that each get their own internal
-// id (see addPlayer) — there's no persistent player identity in the data
-// model, so career history is pulled together by a closure match instead:
-// starting from the clicked name, pull in every roster/free-agent entry
-// anywhere in the league that shares a Roblox account id with an already-
-// matched entry, or whose current name or usernameHistory (past on-site
-// names, tracked when a Roblox rename is detected) overlaps an already-
-// matched entry's names. That lets a roster import that uses an old
-// username — or a season recorded before a rename was resolved — still
-// land on the same career instead of forking into a second identity.
-// Returns every season/team this identity appears on, plus every per-game
-// stat line saved against any of those entries.
-function getPlayerCareerData(league, playerName) {
-  const norm = (s) => (s || '').trim().toLowerCase();
+// Collects every roster/free-agent entry across the whole league. Shared by
+// every identity-closure function below.
+function collectAllPlayerEntries(league) {
   const allEntries = [];
   (league.seasons || []).forEach(season => {
     (season.members || []).forEach(member => {
@@ -4706,6 +4695,81 @@ function getPlayerCareerData(league, playerName) {
     });
     (season.freeAgents || []).forEach(p => allEntries.push({ season, teamId: null, playerId: p.id, player: p }));
   });
+  return allEntries;
+}
+
+// Every roster/free-agent entry anywhere in the league, grouped into "same
+// real person" identities via union-find. A shared Roblox account id is the
+// only signal that actually identifies a person — a name or usernameHistory
+// match only merges two entries when doing so wouldn't fuse two groups that
+// already have different confirmed ids, since two different real accounts
+// can otherwise end up sharing a name (a rename, an admin typo, or, rarely,
+// a genuine coincidence) without being the same person. Returns
+// { allEntries, find, groups } — find(i) gives an entry's identity root,
+// groups maps each root to its member entries.
+function buildIdentityGroups(league) {
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const allEntries = collectAllPlayerEntries(league);
+  const namesOf = (p) => [norm(p.name), ...((p.usernameHistory || []).map(norm))];
+  const idOf = (entry) => (entry.player.robloxUserId ? String(entry.player.robloxUserId) : null);
+
+  const n = allEntries.length;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const rootId = new Map(); // root index -> confirmed Roblox id for that group, if any
+  allEntries.forEach((entry, i) => { const rid = idOf(entry); if (rid) rootId.set(i, rid); });
+  // Refuses a union that would merge two groups whose confirmed ids differ —
+  // that's proof of two different real accounts, not a rename.
+  const union = (a, b) => {
+    const ra = find(a), rb = find(b);
+    if (ra === rb) return true;
+    const ida = rootId.get(ra), idb = rootId.get(rb);
+    if (ida && idb && ida !== idb) return false;
+    parent[ra] = rb;
+    if (ida || idb) rootId.set(rb, ida || idb);
+    return true;
+  };
+  // Id-based unions first and unconditionally (matching ids can never
+  // conflict with themselves) so every group's confirmed id is settled
+  // before any name-based union has to check against it.
+  const byId = new Map();
+  allEntries.forEach((entry, i) => {
+    const rid = idOf(entry);
+    if (!rid) return;
+    if (byId.has(rid)) union(i, byId.get(rid)); else byId.set(rid, i);
+  });
+  const byName = new Map();
+  allEntries.forEach((entry, i) => {
+    namesOf(entry.player).forEach(nm => {
+      if (!nm) return;
+      if (byName.has(nm)) union(i, byName.get(nm)); else byName.set(nm, i);
+    });
+  });
+
+  const groups = new Map();
+  allEntries.forEach((entry, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(entry); });
+  return { allEntries, find, groups };
+}
+
+// A "career" spans season-roster entries that each get their own internal
+// id (see addPlayer) — there's no persistent player identity in the data
+// model, so career history is pulled together by a closure match instead:
+// starting from the clicked name, pull in every roster/free-agent entry
+// anywhere in the league that shares a Roblox account id with an already-
+// matched entry, or whose current name or usernameHistory (past on-site
+// names, tracked when a Roblox rename is detected) overlaps an already-
+// matched entry's names — unless doing so would fuse in an entry whose own
+// Roblox id contradicts one already confirmed for this identity, which
+// means a different real account, not a rename. That lets a roster import
+// that uses an old username — or a season recorded before a rename was
+// resolved — still land on the same career instead of forking into a
+// second identity, without two different people who happen to share a name
+// getting merged into one.
+// Returns every season/team this identity appears on, plus every per-game
+// stat line saved against any of those entries.
+function getPlayerCareerData(league, playerName) {
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const allEntries = collectAllPlayerEntries(league);
   const namesOf = (p) => [norm(p.name), ...((p.usernameHistory || []).map(norm))];
   const knownNames = new Set([norm(playerName)]);
   const knownIds = new Set();
@@ -4716,13 +4780,15 @@ function getPlayerCareerData(league, playerName) {
     allEntries.forEach((entry, i) => {
       if (matched.has(i)) return;
       const rid = entry.player.robloxUserId ? String(entry.player.robloxUserId) : null;
+      const idMatch = rid && knownIds.has(rid);
       const names = namesOf(entry.player);
-      if ((rid && knownIds.has(rid)) || names.some(n => knownNames.has(n))) {
-        matched.add(i);
-        changed = true;
-        if (rid) knownIds.add(rid);
-        names.forEach(n => knownNames.add(n));
-      }
+      const nameMatch = names.some(n => knownNames.has(n));
+      if (!idMatch && !nameMatch) return;
+      if (!idMatch && nameMatch && rid && knownIds.size > 0 && !knownIds.has(rid)) return;
+      matched.add(i);
+      changed = true;
+      if (rid) knownIds.add(rid);
+      names.forEach(n => knownNames.add(n));
     });
   }
   const seasonsInfo = allEntries.filter((_, i) => matched.has(i));
@@ -4969,30 +5035,7 @@ function computeClutchLeaders(season, teamsById) {
 // group's games across every season. Tournament seasons are excluded, same
 // convention as a player's own career totals on their page.
 function computeCareerLeaders(league, mode = 'regular') {
-  const norm = (s) => (s || '').trim().toLowerCase();
-  const allEntries = [];
-  (league.seasons || []).forEach(season => {
-    (season.members || []).forEach(member => {
-      (member.roster || []).forEach(p => allEntries.push({ season, teamId: member.teamId, playerId: p.id, player: p }));
-    });
-    (season.freeAgents || []).forEach(p => allEntries.push({ season, teamId: null, playerId: p.id, player: p }));
-  });
-  const namesOf = (p) => [norm(p.name), ...((p.usernameHistory || []).map(norm))];
-
-  const n = allEntries.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
-  const byId = new Map();
-  const byName = new Map();
-  allEntries.forEach((entry, i) => {
-    const rid = entry.player.robloxUserId ? String(entry.player.robloxUserId) : null;
-    if (rid) { if (byId.has(rid)) union(i, byId.get(rid)); else byId.set(rid, i); }
-    namesOf(entry.player).forEach(nm => { if (!nm) return; if (byName.has(nm)) union(i, byName.get(nm)); else byName.set(nm, i); });
-  });
-
-  const groups = new Map();
-  allEntries.forEach((entry, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(entry); });
+  const { groups } = buildIdentityGroups(league);
 
   const players = [];
   groups.forEach(entries => {
@@ -5039,27 +5082,7 @@ function computeCareerLeaders(league, mode = 'regular') {
 function computeRookieClass(league, activeSeasonId) {
   const activeSeason = (league.seasons || []).find(s => s.id === activeSeasonId);
   if (!activeSeason) return [];
-  const norm = (s) => (s || '').trim().toLowerCase();
-  const allEntries = [];
-  (league.seasons || []).forEach(season => {
-    (season.members || []).forEach(member => {
-      (member.roster || []).forEach(p => allEntries.push({ season, teamId: member.teamId, playerId: p.id, player: p }));
-    });
-    (season.freeAgents || []).forEach(p => allEntries.push({ season, teamId: null, playerId: p.id, player: p }));
-  });
-  const namesOf = (p) => [norm(p.name), ...((p.usernameHistory || []).map(norm))];
-  const n = allEntries.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
-  const byId = new Map(); const byName = new Map();
-  allEntries.forEach((entry, i) => {
-    const rid = entry.player.robloxUserId ? String(entry.player.robloxUserId) : null;
-    if (rid) { if (byId.has(rid)) union(i, byId.get(rid)); else byId.set(rid, i); }
-    namesOf(entry.player).forEach(nm => { if (!nm) return; if (byName.has(nm)) union(i, byName.get(nm)); else byName.set(nm, i); });
-  });
-  const groups = new Map();
-  allEntries.forEach((entry, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(entry); });
+  const { groups } = buildIdentityGroups(league);
 
   const rookies = [];
   groups.forEach(entries => {
@@ -5094,25 +5117,7 @@ function computeRookieClass(league, activeSeasonId) {
 function computeTeamExperience(league, activeSeasonId) {
   const activeSeason = (league.seasons || []).find(s => s.id === activeSeasonId);
   if (!activeSeason) return [];
-  const norm = (s) => (s || '').trim().toLowerCase();
-  const allEntries = [];
-  (league.seasons || []).forEach(season => {
-    (season.members || []).forEach(member => {
-      (member.roster || []).forEach(p => allEntries.push({ season, teamId: member.teamId, playerId: p.id, player: p }));
-    });
-    (season.freeAgents || []).forEach(p => allEntries.push({ season, teamId: null, playerId: p.id, player: p }));
-  });
-  const namesOf = (p) => [norm(p.name), ...((p.usernameHistory || []).map(norm))];
-  const n = allEntries.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
-  const byId = new Map(); const byName = new Map();
-  allEntries.forEach((entry, i) => {
-    const rid = entry.player.robloxUserId ? String(entry.player.robloxUserId) : null;
-    if (rid) { if (byId.has(rid)) union(i, byId.get(rid)); else byId.set(rid, i); }
-    namesOf(entry.player).forEach(nm => { if (!nm) return; if (byName.has(nm)) union(i, byName.get(nm)); else byName.set(nm, i); });
-  });
+  const { allEntries, find } = buildIdentityGroups(league);
   const activeCreatedAt = activeSeason.createdAt || 0;
   const seasonsByRoot = new Map();
   allEntries.forEach((entry, i) => {
@@ -5154,27 +5159,7 @@ function meanStdDev(values) {
 // closure/union-find identity grouping as computeCareerLeaders since this
 // needs the same "which entries are actually the same person" answer.
 function computeZScoreLeaders(league, teamsById, mode = 'regular') {
-  const norm = (s) => (s || '').trim().toLowerCase();
-  const allEntries = [];
-  (league.seasons || []).forEach(season => {
-    (season.members || []).forEach(member => {
-      (member.roster || []).forEach(p => allEntries.push({ season, teamId: member.teamId, playerId: p.id, player: p }));
-    });
-    (season.freeAgents || []).forEach(p => allEntries.push({ season, teamId: null, playerId: p.id, player: p }));
-  });
-  const namesOf = (p) => [norm(p.name), ...((p.usernameHistory || []).map(norm))];
-  const n = allEntries.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
-  const byId = new Map(), byName = new Map();
-  allEntries.forEach((entry, i) => {
-    const rid = entry.player.robloxUserId ? String(entry.player.robloxUserId) : null;
-    if (rid) { if (byId.has(rid)) union(i, byId.get(rid)); else byId.set(rid, i); }
-    namesOf(entry.player).forEach(nm => { if (!nm) return; if (byName.has(nm)) union(i, byName.get(nm)); else byName.set(nm, i); });
-  });
-  const groupOf = new Map();
-  allEntries.forEach((entry, i) => { const r = find(i); if (!groupOf.has(r)) groupOf.set(r, []); groupOf.get(r).push(entry); });
+  const { allEntries, groups: groupOf } = buildIdentityGroups(league);
 
   // z-scores per season, computed once per season and shared across
   // whichever identities qualified in it.
