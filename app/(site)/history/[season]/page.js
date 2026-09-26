@@ -5,9 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useLeague, usePageTitle, deriveSeason } from '../../../../lib/LeagueContext';
 import { seasonTeam, seasonAwards } from '../../../../lib/domain/awards';
-import { seasonPlayerTotals, BATTING_BOARDS, PITCHING_BOARDS, BATTING_BOARDS_PLAYOFFS, PITCHING_BOARDS_PLAYOFFS } from '../../../../lib/domain/stats';
+import { seasonPlayerTotals, BATTING_BOARDS, PITCHING_BOARDS, OVERALL_BOARDS, BATTING_BOARDS_PLAYOFFS, PITCHING_BOARDS_PLAYOFFS, OVERALL_BOARDS_PLAYOFFS } from '../../../../lib/domain/stats';
 import { computeStandings } from '../../../../lib/domain/standings';
-import { isPostseason } from '../../../../lib/domain/playoffs';
 import AwardList from '../../../../components/site/AwardList';
 import LeaderBoard from '../../../../components/site/LeaderBoard';
 import StandingsTable from '../../../../components/site/StandingsTable';
@@ -27,7 +26,11 @@ export default function SeasonHistoryPage() {
   const champion = seasonTeam(season, snapshot.teams, season.championTeamId);
   const awards = seasonAwards(snapshot, season);
   const { players, orphaned } = seasonPlayerTotals(season);
-  const playoffTotals = isPostseason(season) ? seasonPlayerTotals(season, { mode: 'playoffs' }) : null;
+  // Whether a season has playoff stats to show is decided by whether any
+  // actually turn up here, not by isPostseason(season) — an older season
+  // imported wholesale from hcbb.info can have real playoff stat lines with
+  // zero games ever recorded in its schedule.
+  const playoffTotals = seasonPlayerTotals(season, { mode: 'playoffs' });
   const played = (season.games || []).filter(g => g.played && !g.isBye).length;
   const standings = played > 0 || season.members.some(m => m.baselineW || m.baselineL)
     ? computeStandings(season, snapshot.teams).active.map(t => ({ ...t, slug: teamSlug(t.displayName) }))
@@ -85,6 +88,12 @@ export default function SeasonHistoryPage() {
               boards={PITCHING_BOARDS}
               teamFor={id => seasonTeam(season, snapshot.teams, id)}
             />
+            <LeaderBoard
+              title="Overall"
+              players={players}
+              boards={OVERALL_BOARDS}
+              teamFor={id => seasonTeam(season, snapshot.teams, id)}
+            />
           </div>
           {orphaned > 0 && (
             <p className="text-tiny text-ink-faint mt-3">
@@ -109,6 +118,12 @@ export default function SeasonHistoryPage() {
               title="Pitching"
               players={playoffTotals.players}
               boards={PITCHING_BOARDS_PLAYOFFS}
+              teamFor={id => seasonTeam(season, snapshot.teams, id)}
+            />
+            <LeaderBoard
+              title="Overall"
+              players={playoffTotals.players}
+              boards={OVERALL_BOARDS_PLAYOFFS}
               teamFor={id => seasonTeam(season, snapshot.teams, id)}
             />
           </div>

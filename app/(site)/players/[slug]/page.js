@@ -18,7 +18,7 @@ function Stat({ label, value }) {
   );
 }
 
-function BattingRow({ label, totals, batting }) {
+function BattingRow({ label, totals, batting, wrcPlus, war }) {
   return (
     <tr className="border-b border-rule last:border-b-0">
       <td className="px-2 py-2 text-sm font-medium">{label}</td>
@@ -30,11 +30,13 @@ function BattingRow({ label, totals, batting }) {
       <td className="px-2 py-2 stat text-sm text-right text-ink-soft">{totals.r}</td>
       <td className="px-2 py-2 stat text-sm text-right">{pct(batting.avg)}</td>
       <td className="px-2 py-2 stat text-sm text-right">{batting.ops.toFixed(3)}</td>
+      <td className="px-2 py-2 stat text-sm text-right">{wrcPlus == null ? '—' : wrcPlus}</td>
+      <td className="px-2 py-2 stat text-sm text-right">{war == null ? '—' : war.toFixed(1)}</td>
     </tr>
   );
 }
 
-function PitchingRow({ label, totals, pitching }) {
+function PitchingRow({ label, totals, pitching, war }) {
   return (
     <tr className="border-b border-rule last:border-b-0">
       <td className="px-2 py-2 text-sm font-medium">{label}</td>
@@ -44,12 +46,13 @@ function PitchingRow({ label, totals, pitching }) {
       <td className="px-2 py-2 stat text-sm text-right text-ink-soft">{totals.k}</td>
       <td className="px-2 py-2 stat text-sm text-right">{pitching.era.toFixed(2)}</td>
       <td className="px-2 py-2 stat text-sm text-right">{pitching.whip.toFixed(2)}</td>
+      <td className="px-2 py-2 stat text-sm text-right">{war == null ? '—' : war.toFixed(1)}</td>
     </tr>
   );
 }
 
-const BATTING_HEAD = ['G', 'AB', 'H', 'HR', 'RBI', 'R', 'AVG', 'OPS'];
-const PITCHING_HEAD = ['IP', 'H', 'ER', 'K', 'ERA', 'WHIP'];
+const BATTING_HEAD = ['G', 'AB', 'H', 'HR', 'RBI', 'R', 'AVG', 'OPS', 'wRC+', 'WAR'];
+const PITCHING_HEAD = ['IP', 'H', 'ER', 'K', 'ERA', 'WHIP', 'WAR'];
 
 function Head({ first, cols }) {
   return (
@@ -97,11 +100,12 @@ export default function PlayerPage() {
           </div>
         </div>
         {player.hasStats && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-rule border-t border-rule">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-rule border-t border-rule">
             <Stat label="Games" value={career.totals.g} />
             <Stat label="Average" value={pct(career.batting.avg)} />
             <Stat label="Home runs" value={career.totals.hr} />
             <Stat label="ERA" value={career.totals.outs > 0 ? career.pitching.era.toFixed(2) : '—'} />
+            <Stat label="WAR" value={career.war.toFixed(1)} />
           </div>
         )}
       </header>
@@ -149,8 +153,8 @@ export default function PlayerPage() {
             <table>
               <thead><Head first="Season" cols={BATTING_HEAD} /></thead>
               <tbody>
-                {batted.map(s => <BattingRow key={s.id} label={s.name} totals={s.totals} batting={s.batting} />)}
-                {batted.length > 1 && <BattingRow label="Career" totals={career.totals} batting={career.batting} />}
+                {batted.map(s => <BattingRow key={s.id} label={s.name} totals={s.totals} batting={s.batting} wrcPlus={s.wrcPlus} war={s.war} />)}
+                {batted.length > 1 && <BattingRow label="Career" totals={career.totals} batting={career.batting} wrcPlus={null} war={career.war} />}
               </tbody>
             </table>
           </div>
@@ -164,8 +168,8 @@ export default function PlayerPage() {
             <table>
               <thead><Head first="Season" cols={PITCHING_HEAD} /></thead>
               <tbody>
-                {pitched.map(s => <PitchingRow key={s.id} label={s.name} totals={s.totals} pitching={s.pitching} />)}
-                {pitched.length > 1 && <PitchingRow label="Career" totals={career.totals} pitching={career.pitching} />}
+                {pitched.map(s => <PitchingRow key={s.id} label={s.name} totals={s.totals} pitching={s.pitching} war={s.war} />)}
+                {pitched.length > 1 && <PitchingRow label="Career" totals={career.totals} pitching={career.pitching} war={career.war} />}
               </tbody>
             </table>
           </div>
@@ -179,8 +183,8 @@ export default function PlayerPage() {
             <table>
               <thead><Head first="Season" cols={BATTING_HEAD} /></thead>
               <tbody>
-                {playoffBatted.map(s => <BattingRow key={s.id} label={s.name} totals={s.playoffTotals} batting={s.playoffBatting} />)}
-                {playoffBatted.length > 1 && <BattingRow label="Career" totals={careerPlayoffs.totals} batting={careerPlayoffs.batting} />}
+                {playoffBatted.map(s => <BattingRow key={s.id} label={s.name} totals={s.playoffTotals} batting={s.playoffBatting} wrcPlus={s.playoffWrcPlus} war={s.playoffWar} />)}
+                {playoffBatted.length > 1 && <BattingRow label="Career" totals={careerPlayoffs.totals} batting={careerPlayoffs.batting} wrcPlus={null} war={careerPlayoffs.war} />}
               </tbody>
             </table>
           </div>
@@ -194,8 +198,8 @@ export default function PlayerPage() {
             <table>
               <thead><Head first="Season" cols={PITCHING_HEAD} /></thead>
               <tbody>
-                {playoffPitched.map(s => <PitchingRow key={s.id} label={s.name} totals={s.playoffTotals} pitching={s.playoffPitching} />)}
-                {playoffPitched.length > 1 && <PitchingRow label="Career" totals={careerPlayoffs.totals} pitching={careerPlayoffs.pitching} />}
+                {playoffPitched.map(s => <PitchingRow key={s.id} label={s.name} totals={s.playoffTotals} pitching={s.playoffPitching} war={s.playoffWar} />)}
+                {playoffPitched.length > 1 && <PitchingRow label="Career" totals={careerPlayoffs.totals} pitching={careerPlayoffs.pitching} war={careerPlayoffs.war} />}
               </tbody>
             </table>
           </div>
