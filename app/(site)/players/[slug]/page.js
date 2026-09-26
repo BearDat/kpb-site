@@ -71,9 +71,11 @@ export default function PlayerPage() {
   if (!snapshot) return <EmptyNote>No league data yet.</EmptyNote>;
   if (!player) return <EmptyNote>No player by that name has been on a roster in this league.</EmptyNote>;
 
-  const { current, career, seasons, awards, hallOfFame } = player;
+  const { current, career, careerPlayoffs, seasons, awards, hallOfFame } = player;
   const batted = seasons.filter(s => s.totals.ab > 0);
   const pitched = seasons.filter(s => s.totals.outs > 0);
+  const playoffBatted = seasons.filter(s => s.playoffTotals.ab > 0);
+  const playoffPitched = seasons.filter(s => s.playoffTotals.outs > 0);
   const highlights = [...(snapshot.highlights || [])]
     .filter(h => h.playerSlug === slug)
     .sort((a, b) => (b.at || 0) - (a.at || 0));
@@ -164,6 +166,36 @@ export default function PlayerPage() {
               <tbody>
                 {pitched.map(s => <PitchingRow key={s.id} label={s.name} totals={s.totals} pitching={s.pitching} />)}
                 {pitched.length > 1 && <PitchingRow label="Career" totals={career.totals} pitching={career.pitching} />}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {playoffBatted.length > 0 && (
+        <section className="mb-8">
+          <SectionHead title="Playoff batting" />
+          <div className="card overflow-x-auto">
+            <table>
+              <thead><Head first="Season" cols={BATTING_HEAD} /></thead>
+              <tbody>
+                {playoffBatted.map(s => <BattingRow key={s.id} label={s.name} totals={s.playoffTotals} batting={s.playoffBatting} />)}
+                {playoffBatted.length > 1 && <BattingRow label="Career" totals={careerPlayoffs.totals} batting={careerPlayoffs.batting} />}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {playoffPitched.length > 0 && (
+        <section className="mb-8">
+          <SectionHead title="Playoff pitching" />
+          <div className="card overflow-x-auto">
+            <table>
+              <thead><Head first="Season" cols={PITCHING_HEAD} /></thead>
+              <tbody>
+                {playoffPitched.map(s => <PitchingRow key={s.id} label={s.name} totals={s.playoffTotals} pitching={s.playoffPitching} />)}
+                {playoffPitched.length > 1 && <PitchingRow label="Career" totals={careerPlayoffs.totals} pitching={careerPlayoffs.pitching} />}
               </tbody>
             </table>
           </div>

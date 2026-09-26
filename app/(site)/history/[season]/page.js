@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useLeague, usePageTitle, deriveSeason } from '../../../../lib/LeagueContext';
 import { seasonTeam, seasonAwards } from '../../../../lib/domain/awards';
-import { seasonPlayerTotals, BATTING_BOARDS, PITCHING_BOARDS } from '../../../../lib/domain/stats';
+import { seasonPlayerTotals, BATTING_BOARDS, PITCHING_BOARDS, BATTING_BOARDS_PLAYOFFS, PITCHING_BOARDS_PLAYOFFS } from '../../../../lib/domain/stats';
 import { computeStandings } from '../../../../lib/domain/standings';
+import { isPostseason } from '../../../../lib/domain/playoffs';
 import AwardList from '../../../../components/site/AwardList';
 import LeaderBoard from '../../../../components/site/LeaderBoard';
 import StandingsTable from '../../../../components/site/StandingsTable';
@@ -26,6 +27,7 @@ export default function SeasonHistoryPage() {
   const champion = seasonTeam(season, snapshot.teams, season.championTeamId);
   const awards = seasonAwards(snapshot, season);
   const { players, orphaned } = seasonPlayerTotals(season);
+  const playoffTotals = isPostseason(season) ? seasonPlayerTotals(season, { mode: 'playoffs' }) : null;
   const played = (season.games || []).filter(g => g.played && !g.isBye).length;
   const standings = played > 0 || season.members.some(m => m.baselineW || m.baselineL)
     ? computeStandings(season, snapshot.teams).active.map(t => ({ ...t, slug: teamSlug(t.displayName) }))
@@ -90,6 +92,26 @@ export default function SeasonHistoryPage() {
               this season no longer has, so {orphaned === 1 ? 'it is' : 'they are'} not counted here.
             </p>
           )}
+        </section>
+      )}
+
+      {playoffTotals && playoffTotals.players.length > 0 && (
+        <section className="mb-8">
+          <SectionHead title="Playoff stat leaders" />
+          <div className="space-y-5">
+            <LeaderBoard
+              title="Batting"
+              players={playoffTotals.players}
+              boards={BATTING_BOARDS_PLAYOFFS}
+              teamFor={id => seasonTeam(season, snapshot.teams, id)}
+            />
+            <LeaderBoard
+              title="Pitching"
+              players={playoffTotals.players}
+              boards={PITCHING_BOARDS_PLAYOFFS}
+              teamFor={id => seasonTeam(season, snapshot.teams, id)}
+            />
+          </div>
         </section>
       )}
 
