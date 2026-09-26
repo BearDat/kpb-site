@@ -12168,17 +12168,21 @@ function App() {
       (data.players || []).forEach(hp => {
         const robloxId = hp.player_id;
         const locals = robloxId ? byRobloxId.get(robloxId) : null;
-        if (!locals || locals.length === 0) { unmatched++; return; }
+        if (!robloxId) { unmatched++; return; }
         matched++;
-        let entry = locals.find(e => e.seasonId === targetSeasonId);
+        let entry = locals && locals.find(e => e.seasonId === targetSeasonId);
         if (!entry) {
-          // Known player, but not part of this local season yet — land them
-          // as a free agent so the import has somewhere to attach and they
-          // still show up in that season's stat leaders.
-          const bestName = locals[locals.length - 1].player.name;
+          // Either a known player not part of this local season yet, or
+          // someone hcbb.info tracked who was never entered on the site's
+          // own roster at all (never on any team, in any season) — either
+          // way, land them as a free agent here so the import has somewhere
+          // to attach and they still show up in this season's stat leaders,
+          // instead of the stat line just getting silently dropped.
+          const bestName = locals && locals.length > 0 ? locals[locals.length - 1].player.name : hp.player_name;
           const newFa = { ...newPlayer(bestName), robloxUserId: robloxId };
           targetSeason.freeAgents.push(newFa);
           entry = { seasonId: targetSeasonId, teamId: null, player: newFa };
+          if (!byRobloxId.has(robloxId)) byRobloxId.set(robloxId, []);
           byRobloxId.get(robloxId).push(entry);
           created++;
         }
