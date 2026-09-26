@@ -3839,6 +3839,42 @@ function PlayerIdentitySyncPanel({ onRunSync }) {
   );
 }
 
+function CapitalizationFixPanel({ onRunFix }) {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const run = async () => {
+    setRunning(true); setResult(null);
+    const res = await onRunFix();
+    setResult(res);
+    setRunning(false);
+  };
+  return (
+    <Panel className="overflow-hidden" style={{ borderColor: GOLD }}>
+      <SectionTitle accent={GOLD}>Check &amp; fix capitalization</SectionTitle>
+      <div className="px-4 pb-3 space-y-3 text-sm">
+        <p className="text-xs" style={{ color: CHALK_DIM }}>A name that's only mis-capitalized on some seasons (e.g. "D4TBEAR" instead of "d4tbear") already lands on the same combined player page, but still displays inconsistently across rosters and leaderboards. This finds every case-only mismatch and rewrites it to match whichever season is most recent — an actual rename (a different name, not just different casing) is left alone.</p>
+        <button onClick={run} disabled={running} className="px-3 py-2 rounded font-bold text-sm disabled:opacity-40" style={{ background: GOLD, color: INK }}>{running ? 'Checking…' : 'Check now'}</button>
+        {result && result.error && <p className="text-xs" style={{ color: NEGATIVE }}>{result.error}</p>}
+        {result && !result.error && (
+          <div className="space-y-1 pt-2" style={{ borderTop: `1px solid ${LINE}` }}>
+            {result.fixed === 0 ? (
+              <p className="text-xs" style={{ color: CHALK_DIM }}>No capitalization mismatches found.</p>
+            ) : (
+              <>
+                <p className="text-xs" style={{ color: CHALK_DIM }}>Fixed {result.fixed} entr{result.fixed === 1 ? 'y' : 'ies'}:</p>
+                {result.examples.map((e, i) => (
+                  <p key={i} className="text-xs" style={{ color: CHALK_DIM }}>{e.season}: "{e.from}" → "{e.to}"</p>
+                ))}
+                {result.fixed > result.examples.length && <p className="text-xs" style={{ color: CHALK_DIM }}>…and {result.fixed - result.examples.length} more.</p>}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 // Badge definitions are global to the whole site (like the team registry),
 // so only Site Owner and Commissioner can create or delete one — same
 // trust tier as the awards system these complement. Any admin can still
@@ -4012,7 +4048,7 @@ function EmergencyBanner({ banner }) {
   );
 }
 
-function SettingsView({ settings, saveSettings, theme, saveTheme, sport, season, teamsById, importGames, addManualGame, generateSchedule, league, onRunKpbImport, onSyncPlayerIdentities }) {
+function SettingsView({ settings, saveSettings, theme, saveTheme, sport, season, teamsById, importGames, addManualGame, generateSchedule, league, onRunKpbImport, onSyncPlayerIdentities, onFixCapitalization }) {
   const { hasPermission } = useAuth();
   const canManageSettings = hasPermission('manageSettings');
   const canManageSchedule = hasPermission('manageSchedule');
@@ -4150,6 +4186,7 @@ function SettingsView({ settings, saveSettings, theme, saveTheme, sport, season,
       )}
       {canManageSettings && <KpbImportPanel league={league} onRunImport={onRunKpbImport} />}
       {canManageSettings && <PlayerIdentitySyncPanel onRunSync={onSyncPlayerIdentities} />}
+      {canManageSettings && <CapitalizationFixPanel onRunFix={onFixCapitalization} />}
       {canManageSettings && <SettingsGroupHeader label="Appearance" />}
       <AppearanceSettings theme={theme} saveTheme={saveTheme} />
     </div>
@@ -12304,6 +12341,49 @@ function App() {
     return { checked: knownIds.length, linked, namesEnriched, conflicts };
   };
 
+  // A pure capitalization mismatch (a player added as "D4TBEAR" on one
+  // season, "d4tbear" on another) already lands on one combined player page
+  // — playerSlug lowercases for identity matching — but the raw name still
+  // shows inconsistently wherever it's displayed (rosters, standings,
+  // leaders). This standardizes it: for every identity with more than one
+  // roster/free-agent entry, whichever entry belongs to the most recently
+  // created season sets the canonical casing, and any other entry whose
+  // name is a case-only variant of it gets rewritten to match. A genuine
+  // rename (an actually different name, not just different casing) is left
+  // untouched — only an exact case-insensitive match qualifies.
+  const fixNameCapitalization = () => {
+    if (!league) return { error: 'No league loaded.' };
+    const seasonsDraft = league.seasons.map(s => ({
+      ...s,
+      members: (s.members || []).map(m => ({ ...m, roster: (m.roster || []).map(p => ({ ...p })) })),
+      freeAgents: (s.freeAgents || []).map(p => ({ ...p })),
+    }));
+    const draftLeague = { ...league, seasons: seasonsDraft };
+    const { groups } = buildIdentityGroups(draftLeague);
+
+    let fixed = 0;
+    const examples = [];
+    groups.forEach(entries => {
+      if (entries.length < 2) return;
+      const latest = [...entries].sort((a, b) => (a.season.createdAt || 0) - (b.season.createdAt || 0)).pop();
+      const canonical = (latest.player.name || '').trim();
+      if (!canonical) return;
+      const canonicalLower = canonical.toLowerCase();
+      entries.forEach(entry => {
+        const name = entry.player.name || '';
+        if (name === canonical) return;
+        if (name.trim().toLowerCase() !== canonicalLower) return; // a real rename, not a case mismatch
+        if (examples.length < 20) examples.push({ season: entry.season.name, from: name, to: canonical });
+        entry.player.name = canonical;
+        fixed++;
+      });
+    });
+
+    if (fixed === 0) return { fixed: 0, examples: [] };
+    persistLeague(draftLeague);
+    return { fixed, examples };
+  };
+
   /* ---- awards ---- */
   const addAwardDef = (name, description) => {
     if (!league) return;
@@ -13179,7 +13259,7 @@ function App() {
     } else if (tab === 'info') {
       body = <LeagueInfoView league={league} updateLeagueInfo={updateLeagueInfo} addStaffMember={addStaffMember} updateStaffMember={updateStaffMember} removeStaffMember={removeStaffMember} addLeagueLink={addLeagueLink} updateLeagueLink={updateLeagueLink} removeLeagueLink={removeLeagueLink} onUpdateConstitution={updateConstitution} />;
     } else if (tab === 'settings') {
-      body = <SettingsView settings={activeSeason.settings} saveSettings={saveSettings} theme={theme} saveTheme={saveTheme} sport={sport} season={activeSeason} teamsById={teamsById} importGames={importGames} addManualGame={addManualGame} generateSchedule={generateSchedule} league={league} onRunKpbImport={runKpbImport} onSyncPlayerIdentities={syncPlayerIdentities} />;
+      body = <SettingsView settings={activeSeason.settings} saveSettings={saveSettings} theme={theme} saveTheme={saveTheme} sport={sport} season={activeSeason} teamsById={teamsById} importGames={importGames} addManualGame={addManualGame} generateSchedule={generateSchedule} league={league} onRunKpbImport={runKpbImport} onSyncPlayerIdentities={syncPlayerIdentities} onFixCapitalization={fixNameCapitalization} />;
     } else if (tab === 'admin') {
       body = <AdminDashboardView league={league} season={activeSeason} teamsById={teamsById} applyPending={applyPending} notifications={notifications} staleFreeAgentCount={staleFreeAgentCount} settings={activeSeason.settings} onViewGM={() => setTab('roster')} onViewTransactions={() => setTab('transactions')} onAddBadgeDef={addBadgeDef} onRemoveBadgeDef={removeBadgeDef} onSetMaintenanceBanner={setMaintenanceBanner} onSetEmergencyBanner={setEmergencyBanner} onAddChangelogEntry={addChangelogEntry} onRemoveChangelogEntry={removeChangelogEntry} onMergePlayers={mergePlayers} onLogAudit={logAudit} onOpenRegistry={openRegistry} />;
     } else if (tab === 'team') {
