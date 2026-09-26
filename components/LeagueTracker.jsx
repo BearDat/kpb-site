@@ -3789,7 +3789,9 @@ function KpbImportPanel({ league, onRunImport }) {
           <div className="space-y-1 pt-2" style={{ borderTop: `1px solid ${LINE}` }}>
             {Object.entries(result.seasons).map(([s, r]) => (
               <p key={s} className="text-xs" style={{ color: r.error ? NEGATIVE : CHALK_DIM }}>
-                S{s}: {r.error || `matched ${r.matched}/${r.total} into "${r.targetSeasonName}"${r.created ? ` (${r.created} added as free agents)` : ''} — ${r.unmatched} unmatched`}
+                S{s}: {r.error || `matched ${r.matched}/${r.total} into "${r.targetSeasonName}"${r.created ? ` (${r.created} added as free agents)` : ''} — ${r.unmatched} unmatched${
+                  r.playoffs ? `; playoffs: matched ${r.playoffs.matched}/${r.playoffs.total}${r.playoffs.created ? ` (${r.playoffs.created} added as free agents)` : ''} — ${r.playoffs.unmatched} unmatched` : ''
+                }`}
               </p>
             ))}
           </div>
@@ -12114,7 +12116,7 @@ function App() {
   // is true decimal innings; this app stores IP in the ".1/.2 = thirds of an
   // inning" box-score notation everywhere else, so it has to be converted
   // via outs rather than copied straight across.
-  const hcbbRowToStatFields = (hp) => ({
+  const hcbbRowToStatFields = (hp, isPlayoff) => ({
     // games_played covers every game this player appeared in at all (the
     // same "one row = one game" convention the rest of the app uses for G),
     // so it's what stands in for a game count on this single aggregate row.
@@ -12125,6 +12127,7 @@ function App() {
     ha: hp.hits_allowed || 0, er: hp.er || 0, bbAllowed: hp.walks_pitching || 0,
     k: hp.strikeouts_pitched || 0, hrAllowed: hp.homeruns_allowed || 0, e: hp.errors || 0,
     hr: hp.homeruns || 0, doubles: hp.doubles || 0, triples: hp.triples || 0,
+    isPlayoff: !!isPlayoff,
   });
   // mapping: { '1': localSeasonId|null, '2': ..., '3': ... }. Runs entirely
   // client-side (this is an admin-triggered, one-off bulk action, not
@@ -12190,16 +12193,23 @@ function App() {
     const seasonById = new Map(seasonsDraft.map(s => [s.id, s]));
     const summary = { seasons: {} };
 
-    for (const [kpbSeason, targetSeasonId] of seasonEntries) {
-      const targetSeason = seasonById.get(targetSeasonId);
-      const sourceLabel = `KPB S${kpbSeason}`;
-      if (!targetSeason) { summary.seasons[kpbSeason] = { error: 'That local season no longer exists.' }; continue; }
+    // hcbb.info tracks a season's playoffs as a separate dataset under the
+    // same season number with a literal "P" suffix (e.g. "3P" for Season 3
+    // playoffs) — not a query flag, a distinct value of the same "season"
+    // param the regular-season fetch already uses. Runs both passes per
+    // mapped season so playoff stat lines land tagged isPlayoff: true
+    // instead of just never being fetched at all.
+    const importOnePass = async (kpbSeason, targetSeason, isPlayoff) => {
+      const hcbbSeason = isPlayoff ? `${kpbSeason}P` : String(kpbSeason);
+      const sourceLabel = `KPB S${kpbSeason}${isPlayoff ? ' Playoffs' : ''}`;
       let data;
       try {
-        const res = await fetch(`/api/hcbb-import?season=${kpbSeason}`);
-        if (!res.ok) { summary.seasons[kpbSeason] = { error: `hcbb.info request failed (${res.status}).` }; continue; }
+        const res = await fetch(`/api/hcbb-import?season=${hcbbSeason}`);
+        if (!res.ok) return isPlayoff ? { matched: 0, unmatched: 0, created: 0, total: 0, skipped: true } : { error: `hcbb.info request failed (${res.status}).` };
         data = await res.json();
-      } catch (e) { summary.seasons[kpbSeason] = { error: 'Network error contacting hcbb.info.' }; continue; }
+      } catch (e) {
+        return isPlayoff ? { matched: 0, unmatched: 0, created: 0, total: 0, skipped: true } : { error: 'Network error contacting hcbb.info.' };
+      }
 
       let matched = 0, unmatched = 0, created = 0;
       (data.players || []).forEach(hp => {
@@ -12207,7 +12217,7 @@ function App() {
         const locals = robloxId ? byRobloxId.get(robloxId) : null;
         if (!robloxId) { unmatched++; return; }
         matched++;
-        let entry = locals && locals.find(e => e.seasonId === targetSeasonId);
+        let entry = locals && locals.find(e => e.seasonId === targetSeason.id);
         if (!entry) {
           // Either a known player not part of this local season yet, or
           // someone hcbb.info tracked who was never entered on the site's
@@ -12218,20 +12228,33 @@ function App() {
           const bestName = locals && locals.length > 0 ? locals[locals.length - 1].player.name : hp.player_name;
           const newFa = { ...newPlayer(bestName), robloxUserId: robloxId };
           targetSeason.freeAgents.push(newFa);
-          entry = { seasonId: targetSeasonId, teamId: null, player: newFa };
+          entry = { seasonId: targetSeason.id, teamId: null, player: newFa };
           if (!byRobloxId.has(robloxId)) byRobloxId.set(robloxId, []);
           byRobloxId.get(robloxId).push(entry);
           created++;
         }
         const line = {
           id: uid('imp'), playerId: entry.player.id, source: 'hcbb-kpb', sourceSeason: String(kpbSeason), sourceLabel,
-          importedAt: Date.now(), ...hcbbRowToStatFields(hp),
+          importedAt: Date.now(), ...hcbbRowToStatFields(hp, isPlayoff),
         };
-        const existingIdx = targetSeason.importedStatLines.findIndex(l => l.source === 'hcbb-kpb' && l.sourceSeason === String(kpbSeason) && l.playerId === entry.player.id);
+        const existingIdx = targetSeason.importedStatLines.findIndex(l => l.source === 'hcbb-kpb' && l.sourceSeason === String(kpbSeason) && l.playerId === entry.player.id && !!l.isPlayoff === isPlayoff);
         if (existingIdx >= 0) targetSeason.importedStatLines[existingIdx] = line;
         else targetSeason.importedStatLines.push(line);
       });
-      summary.seasons[kpbSeason] = { targetSeasonName: targetSeason.name, matched, unmatched, created, total: (data.players || []).length };
+      return { matched, unmatched, created, total: (data.players || []).length };
+    };
+
+    for (const [kpbSeason, targetSeasonId] of seasonEntries) {
+      const targetSeason = seasonById.get(targetSeasonId);
+      if (!targetSeason) { summary.seasons[kpbSeason] = { error: 'That local season no longer exists.' }; continue; }
+      const regular = await importOnePass(kpbSeason, targetSeason, false);
+      if (regular.error) { summary.seasons[kpbSeason] = { error: regular.error }; continue; }
+      const playoffs = await importOnePass(kpbSeason, targetSeason, true);
+      summary.seasons[kpbSeason] = {
+        targetSeasonName: targetSeason.name,
+        matched: regular.matched, unmatched: regular.unmatched, created: regular.created, total: regular.total,
+        playoffs: playoffs.skipped ? null : { matched: playoffs.matched, unmatched: playoffs.unmatched, created: playoffs.created, total: playoffs.total },
+      };
     }
 
     persistLeague({ ...league, seasons: seasonsDraft });
