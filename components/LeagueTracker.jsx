@@ -3854,7 +3854,7 @@ function CapitalizationFixPanel({ onRunFix }) {
     <Panel className="overflow-hidden" style={{ borderColor: GOLD }}>
       <SectionTitle accent={GOLD}>Check &amp; fix capitalization</SectionTitle>
       <div className="px-4 pb-3 space-y-3 text-sm">
-        <p className="text-xs" style={{ color: CHALK_DIM }}>A name that's only mis-capitalized on some seasons (e.g. "D4TBEAR" instead of "d4tbear") already lands on the same combined player page, but still displays inconsistently across rosters and leaderboards. This finds every case-only mismatch and rewrites it to match whichever season is most recent — an actual rename (a different name, not just different casing) is left alone.</p>
+        <p className="text-xs" style={{ color: CHALK_DIM }}>A name that's only mis-capitalized on some seasons (e.g. "D4TBEAR" instead of "d4tbear") already lands on the same combined player page, but still displays inconsistently across rosters and leaderboards. This finds every case-only mismatch and rewrites it to match — for anyone with a known Roblox account, their real, correctly-cased current username straight from Roblox; otherwise whichever season is most recent. An actual rename (a different name, not just different casing) is left alone.</p>
         <button onClick={run} disabled={running} className="px-3 py-2 rounded font-bold text-sm disabled:opacity-40" style={{ background: GOLD, color: INK }}>{running ? 'Checking…' : 'Check now'}</button>
         {result && result.error && <p className="text-xs" style={{ color: NEGATIVE }}>{result.error}</p>}
         {result && !result.error && (
@@ -12368,13 +12368,16 @@ function App() {
   // season, "d4tbear" on another) already lands on one combined player page
   // — playerSlug lowercases for identity matching — but the raw name still
   // shows inconsistently wherever it's displayed (rosters, standings,
-  // leaders). This standardizes it: for every identity with more than one
-  // roster/free-agent entry, whichever entry belongs to the most recently
-  // created season sets the canonical casing, and any other entry whose
-  // name is a case-only variant of it gets rewritten to match. A genuine
-  // rename (an actually different name, not just different casing) is left
-  // untouched — only an exact case-insensitive match qualifies.
-  const fixNameCapitalization = () => {
+  // leaders). This standardizes it: for every identity that has a known
+  // Roblox account id, that account's live current username (fetched
+  // fresh, correctly cased, straight from Roblox) is the canonical
+  // spelling — the actual source of truth, not a guess. An identity with no
+  // id to check falls back to whichever entry belongs to the most recently
+  // created season. Either way, any entry whose name is a case-only variant
+  // of the canonical spelling gets rewritten to match — a genuine rename
+  // (an actually different name, not just different casing) is left
+  // untouched, since only an exact case-insensitive match qualifies.
+  const fixNameCapitalization = async () => {
     if (!league) return { error: 'No league loaded.' };
     const seasonsDraft = league.seasons.map(s => ({
       ...s,
@@ -12384,12 +12387,36 @@ function App() {
     const draftLeague = { ...league, seasons: seasonsDraft };
     const { groups } = buildIdentityGroups(draftLeague);
 
+    // One live lookup per distinct Roblox id across every identity, rate-
+    // limited the same way the other bulk Roblox lookups in this file are.
+    const idsToCheck = [...new Set(
+      [...groups.values()].flatMap(entries => entries.map(e => e.player.robloxUserId).filter(Boolean))
+    )];
+    const liveUsernameById = new Map();
+    const CONCURRENCY = 5;
+    for (let i = 0; i < idsToCheck.length; i += CONCURRENCY) {
+      const batch = idsToCheck.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(async (id) => {
+        try {
+          const res = await fetch(`/api/roblox-avatar?userId=${encodeURIComponent(id)}`);
+          if (res.ok) { const data = await res.json(); if (data.username) liveUsernameById.set(id, data.username); }
+        } catch (e) { /* leave unresolved — falls back to the recency heuristic below */ }
+      }));
+    }
+
     let fixed = 0;
     const examples = [];
     groups.forEach(entries => {
-      if (entries.length < 2) return;
-      const latest = [...entries].sort((a, b) => (a.season.createdAt || 0) - (b.season.createdAt || 0)).pop();
-      const canonical = (latest.player.name || '').trim();
+      const knownId = entries.map(e => e.player.robloxUserId).find(Boolean);
+      const liveUsername = knownId ? liveUsernameById.get(knownId) : null;
+      let canonical;
+      if (liveUsername) {
+        canonical = liveUsername;
+      } else {
+        if (entries.length < 2) return;
+        const latest = [...entries].sort((a, b) => (a.season.createdAt || 0) - (b.season.createdAt || 0)).pop();
+        canonical = (latest.player.name || '').trim();
+      }
       if (!canonical) return;
       const canonicalLower = canonical.toLowerCase();
       entries.forEach(entry => {
