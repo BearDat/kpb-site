@@ -3852,9 +3852,9 @@ function CapitalizationFixPanel({ onRunFix }) {
   };
   return (
     <Panel className="overflow-hidden" style={{ borderColor: GOLD }}>
-      <SectionTitle accent={GOLD}>Check &amp; fix capitalization</SectionTitle>
+      <SectionTitle accent={GOLD}>Check &amp; fix capitalization / Roblox links</SectionTitle>
       <div className="px-4 pb-3 space-y-3 text-sm">
-        <p className="text-xs" style={{ color: CHALK_DIM }}>A name that's only mis-capitalized on some seasons (e.g. "D4TBEAR" instead of "d4tbear") already lands on the same combined player page, but still displays inconsistently across rosters and leaderboards. This finds every case-only mismatch and rewrites it to match — for anyone with a known Roblox account, their real, correctly-cased current username straight from Roblox; otherwise whichever season is most recent. An actual rename (a different name, not just different casing) is left alone.</p>
+        <p className="text-xs" style={{ color: CHALK_DIM }}>A name that's only mis-capitalized on some seasons (e.g. "D4TBEAR" instead of "d4tbear") already lands on the same combined player page, but still displays inconsistently across rosters and leaderboards. This finds every case-only mismatch and rewrites it to match — for anyone with a known Roblox account, their real, correctly-cased current username straight from Roblox; otherwise whichever season is most recent. An actual rename (a different name, not just different casing) is left alone. It also flags (without changing anything) any name recorded under two different Roblox accounts — a sign a roster entry has the wrong account linked, usually because a stale name got reclaimed by someone else on Roblox — so it can be reviewed and fixed by hand.</p>
         <button onClick={run} disabled={running} className="px-3 py-2 rounded font-bold text-sm disabled:opacity-40" style={{ background: GOLD, color: INK }}>{running ? 'Checking…' : 'Check now'}</button>
         {result && result.error && <p className="text-xs" style={{ color: NEGATIVE }}>{result.error}</p>}
         {result && !result.error && (
@@ -3870,6 +3870,19 @@ function CapitalizationFixPanel({ onRunFix }) {
                 {result.fixed > result.examples.length && <p className="text-xs" style={{ color: CHALK_DIM }}>…and {result.fixed - result.examples.length} more.</p>}
               </>
             )}
+          </div>
+        )}
+        {result && !result.error && result.conflicts && result.conflicts.length > 0 && (
+          <div className="space-y-2 pt-2" style={{ borderTop: `1px solid ${NEGATIVE}55` }}>
+            <p className="text-xs font-bold" style={{ color: NEGATIVE }}>{result.conflicts.length} name{result.conflicts.length === 1 ? '' : 's'} linked to more than one Roblox account — needs manual review:</p>
+            {result.conflicts.map((c, i) => (
+              <div key={i} className="text-xs" style={{ color: CHALK_DIM }}>
+                <span className="font-semibold" style={{ color: CHALK }}>"{c.name}"</span>
+                {c.ids.map((idInfo, j) => (
+                  <p key={j} className="pl-3">• id {idInfo.id}{idInfo.username ? ` (currently "${idInfo.username}" on Roblox)` : ' (Roblox lookup failed)'} — {idInfo.seasons.join(', ')}</p>
+                ))}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -12429,9 +12442,37 @@ function App() {
       });
     });
 
-    if (fixed === 0) return { fixed: 0, examples: [] };
+    // Surface (never auto-fix) any name recorded under more than one
+    // different confirmed Roblox id anywhere in the league. buildIdentityGroups
+    // already refuses to merge groups whose ids disagree, so the same name
+    // showing up in two different groups here means two different real
+    // Roblox accounts share (or once shared) that exact name — the same
+    // "wrong id on the roster entry" mismatch that silently split a few
+    // players' career stats in two before backfillRobloxId's conflict guard
+    // existed. Deciding which entry's id (or name) is actually wrong needs a
+    // human to check both accounts on Roblox, so this just reports it.
+    const idsByName = new Map();
+    groups.forEach(entries => {
+      const id = entries.map(e => e.player.robloxUserId).find(Boolean);
+      if (!id) return;
+      entries.forEach(entry => {
+        const nm = (entry.player.name || '').trim().toLowerCase();
+        if (!nm) return;
+        if (!idsByName.has(nm)) idsByName.set(nm, new Map());
+        const byId = idsByName.get(nm);
+        if (!byId.has(id)) byId.set(id, { id, username: liveUsernameById.get(id) || null, seasons: [] });
+        const rec = byId.get(id);
+        if (!rec.seasons.includes(entry.season.name)) rec.seasons.push(entry.season.name);
+      });
+    });
+    const conflicts = [];
+    idsByName.forEach((byId, nm) => {
+      if (byId.size > 1) conflicts.push({ name: nm, ids: [...byId.values()] });
+    });
+
+    if (fixed === 0) return { fixed: 0, examples: [], conflicts };
     persistLeague(draftLeague);
-    return { fixed, examples };
+    return { fixed, examples, conflicts };
   };
 
   /* ---- awards ---- */
@@ -12553,6 +12594,20 @@ function App() {
     if (!league || !robloxUserId) return;
     const norm = (s) => (s || '').trim().toLowerCase();
     const target = norm(name);
+    // A username-based lookup only has the name string to go on, but Roblox
+    // usernames get released on a rename and can be picked up by a totally
+    // different account later — so "this name currently resolves to id X"
+    // doesn't prove every past entry under that name is the same person.
+    // If this name is already confirmed elsewhere under a *different* id,
+    // that's exactly the ambiguous case (e.g. a stale historical entry whose
+    // name a stranger has since reclaimed) — stamping id X onto it would
+    // silently merge two different real players' careers, as happened to a
+    // few players before this guard existed. Bail out and leave it for an
+    // admin to sort out via the capitalization/link-check tool instead.
+    const hasConflict = collectAllPlayerEntries(league).some(e =>
+      norm(e.player.name) === target && e.player.robloxUserId && String(e.player.robloxUserId) !== String(robloxUserId)
+    );
+    if (hasConflict) return;
     let changed = false;
     const setIfMatch = (p) => {
       if (!p.robloxUserId && norm(p.name) === target) { changed = true; return { ...p, robloxUserId }; }
